@@ -546,16 +546,36 @@ final class OverlayView: NSView {
         if let event = bubble.lastEvent?.event, event.contains("exited") || event.contains("died") {
             return false
         }
-        let text = "\(bubble.summary) \(bubble.pane.transcriptSnippet) \(bubble.pane.title)".lowercased()
-        if text.contains("nothing to do")
+        let command = bubble.pane.currentCommand.lowercased()
+        if command == "zsh" || command == "bash" {
+            return false
+        }
+
+        let text = "\(bubble.summary) \(bubble.pane.transcriptSnippet) \(bubble.pane.transcriptTail) \(bubble.pane.title)".lowercased()
+        if text.contains("no active agents")
+            || text.contains("nothing to do")
             || text.contains("completed")
             || text.contains("done")
             || text.contains("pass")
             || text.contains("passed")
             || text.contains("success")
             || text.contains("succeeded")
+            || text.contains("worked for")
             || text.contains("終了") {
             return false
+        }
+        if text.contains("\n› ")
+            || text.contains("\n❯")
+            || text.contains("╰─ ❯")
+            || text.contains("write tests for @filename")
+            || text.contains("run /review on my current changes") {
+            return false
+        }
+        if text.contains("esc to interrupt")
+            || text.contains("interrupt to stop")
+            || text.contains("working")
+            || text.contains("running") {
+            return true
         }
         return true
     }

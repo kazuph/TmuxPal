@@ -90,7 +90,8 @@ public struct TmuxCollector: Sendable {
                 let text = String(line)
                 let pane = parseLine(text) ?? parseLine(text, commandLineOverride: processCommandLines(forTmuxLine: text))
                 if let pane {
-                    return pane.withTranscriptSnippet(captureSnippet(for: pane.paneId))
+                    let transcript = captureTranscript(for: pane.paneId)
+                    return pane.withTranscript(snippet: summarizeTranscript(transcript), tail: transcript)
                 }
                 return nil
             }
@@ -154,10 +155,14 @@ public struct TmuxCollector: Sendable {
         return try? runner.run("/bin/ps", ["-o", "pid=,ppid=,comm=,command=", "-t", tty])
     }
 
-    private func captureSnippet(for paneId: String) -> String {
+    private func captureTranscript(for paneId: String) -> String {
         guard let output = try? runTmux(["capture-pane", "-p", "-J", "-t", paneId, "-S", "-24"]) else {
             return ""
         }
+        return output
+    }
+
+    private func summarizeTranscript(_ output: String) -> String {
         let noise = [
             "esc to interrupt",
             "esc to cancel",
