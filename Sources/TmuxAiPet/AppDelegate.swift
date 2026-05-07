@@ -268,6 +268,7 @@ final class OverlayView: NSView {
     private var frameIndex = 0
     private var framesByState: [String: [PetFrame]] = [:]
     private var animationTimer: Timer?
+    private let runClassifier = BubbleRunClassifier()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -425,7 +426,7 @@ final class OverlayView: NSView {
         let location = locationLabel(for: bubble.pane)
         let statusSize: CGFloat = 16
         let statusRect = NSRect(x: rect.maxX - 12 - statusSize, y: rect.maxY - 24, width: statusSize, height: statusSize)
-        drawStatus(in: statusRect, running: isRunningTask(bubble))
+        drawStatus(in: statusRect, state: runState(for: bubble))
 
         let locationAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
@@ -454,21 +455,35 @@ final class OverlayView: NSView {
         }
     }
 
-    private func drawStatus(in rect: NSRect, running: Bool) {
+    private func drawStatus(in rect: NSRect, state: BubbleRunState) {
         let path = NSBezierPath(ovalIn: rect)
-        if running {
-            NSColor(calibratedRed: 0.04, green: 0.63, blue: 0.25, alpha: 1).setFill()
+        let green = NSColor(calibratedRed: 0.04, green: 0.63, blue: 0.25, alpha: 1)
+        if state == .running {
+            green.withAlphaComponent(0.16).setFill()
             path.fill()
+            green.setStroke()
+            let spinner = NSBezierPath()
+            let start = CGFloat(frameIndex % 12) * 30
+            spinner.appendArc(
+                withCenter: NSPoint(x: rect.midX, y: rect.midY),
+                radius: rect.width / 2 - 1.5,
+                startAngle: start,
+                endAngle: start + 250,
+                clockwise: false
+            )
+            spinner.lineWidth = 2.2
+            spinner.lineCapStyle = .round
+            spinner.stroke()
             return
         }
-        NSColor(calibratedRed: 0.04, green: 0.63, blue: 0.25, alpha: 0.14).setFill()
+        green.withAlphaComponent(0.14).setFill()
         path.fill()
-        NSColor(calibratedRed: 0.04, green: 0.55, blue: 0.22, alpha: 1).setStroke()
+        green.setStroke()
         path.lineWidth = 1
         path.stroke()
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 10, weight: .bold),
-            .foregroundColor: NSColor(calibratedRed: 0.04, green: 0.55, blue: 0.22, alpha: 1)
+            .foregroundColor: green
         ]
         NSString(string: "✓").draw(in: rect.insetBy(dx: 3.5, dy: 1.2), withAttributes: attrs)
     }
@@ -539,45 +554,11 @@ final class OverlayView: NSView {
     }
 
     private func runningTaskCount() -> Int {
-        bubbles.filter(isRunningTask).count
+        bubbles.filter { runState(for: $0) == .running }.count
     }
 
-    private func isRunningTask(_ bubble: PaneBubble) -> Bool {
-        if let event = bubble.lastEvent?.event, event.contains("exited") || event.contains("died") {
-            return false
-        }
-        let command = bubble.pane.currentCommand.lowercased()
-        if command == "zsh" || command == "bash" {
-            return false
-        }
-
-        let text = "\(bubble.summary) \(bubble.pane.transcriptSnippet) \(bubble.pane.transcriptTail) \(bubble.pane.title)".lowercased()
-        if text.contains("no active agents")
-            || text.contains("nothing to do")
-            || text.contains("completed")
-            || text.contains("done")
-            || text.contains("pass")
-            || text.contains("passed")
-            || text.contains("success")
-            || text.contains("succeeded")
-            || text.contains("worked for")
-            || text.contains("終了") {
-            return false
-        }
-        if text.contains("\n› ")
-            || text.contains("\n❯")
-            || text.contains("╰─ ❯")
-            || text.contains("write tests for @filename")
-            || text.contains("run /review on my current changes") {
-            return false
-        }
-        if text.contains("esc to interrupt")
-            || text.contains("interrupt to stop")
-            || text.contains("working")
-            || text.contains("running") {
-            return true
-        }
-        return true
+    private func runState(for bubble: PaneBubble) -> BubbleRunState {
+        runClassifier.classify(bubble)
     }
 
     private func advanceAnimation() {

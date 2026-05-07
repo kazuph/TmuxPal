@@ -62,6 +62,40 @@ final class TmuxAiPetCoreTests: XCTestCase {
         XCTAssertEqual(events[0].event, "pane-exited")
     }
 
+    func testClassifiesWorkingAfterOlderCompletedAsRunning() throws {
+        let transcript = try String(contentsOfFile: fixturePath("codex-working-after-completed.txt"), encoding: .utf8)
+        let bubble = PaneBubble(
+            pane: makePane(command: "node", transcriptTail: transcript),
+            summary: "kazuph\nRun /review on my current changes"
+        )
+
+        XCTAssertEqual(BubbleRunClassifier().classify(bubble), .running)
+    }
+
+    func testClassifiesCodexPromptAsComplete() {
+        let transcript = """
+        ─ Worked for 1m 30s ──────────────────
+
+        › Write tests for @filename
+        """
+        let bubble = PaneBubble(
+            pane: makePane(command: "node", transcriptTail: transcript),
+            summary: "hermes-agent\n- Cloudflare x Stripe Projects"
+        )
+
+        XCTAssertEqual(BubbleRunClassifier().classify(bubble), .complete)
+    }
+
+    func testClassifiesNoActiveAgentsAsComplete() {
+        let transcript = "| Next refresh: 5s | No active agents |-- Backoff queue"
+        let bubble = PaneBubble(
+            pane: makePane(command: "beam.smp", transcriptTail: transcript),
+            summary: "elixir\n\(transcript)"
+        )
+
+        XCTAssertEqual(BubbleRunClassifier().classify(bubble), .complete)
+    }
+
     private func fixturePath(_ name: String) -> String {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -70,5 +104,27 @@ final class TmuxAiPetCoreTests: XCTestCase {
             .appendingPathComponent("Fixtures")
             .appendingPathComponent(name)
             .path
+    }
+
+    private func makePane(command: String, transcriptTail: String) -> TmuxPane {
+        TmuxPane(
+            sessionName: "0",
+            windowIndex: "1",
+            windowId: "@1",
+            windowName: "repo",
+            paneIndex: "1",
+            paneId: "%1",
+            panePid: "123",
+            paneTty: "/dev/ttys001",
+            currentCommand: command,
+            currentPath: "/tmp/repo",
+            active: true,
+            title: "repo",
+            commandLine: command,
+            transcriptSnippet: transcriptTail,
+            transcriptTail: transcriptTail,
+            tool: .codex,
+            status: .selected
+        )
     }
 }

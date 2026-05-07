@@ -1,0 +1,5 @@
+    {"conclusion":"skipped","createdAt":"2026-05-07T09:30:34Z","databaseId":2548,"event":"issue_comment","headBranch":"main","status":"completed"}
+
+• Working (43s • esc to interrupt)
+
+› Run /review on my current changes
