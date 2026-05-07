@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.kazuph.tmux-ai-pet</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__APP__/Contents/MacOS/TmuxAiPet</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/tmux-ai-pet.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/tmux-ai-pet.err.log</string>
+</dict>
+</plist>
