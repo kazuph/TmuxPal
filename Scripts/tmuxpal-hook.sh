@@ -11,7 +11,7 @@ pane_current_command="${7:-}"
 pane_current_path="${8:-}"
 pane_title="${9:-}"
 
-support_dir="${HOME}/Library/Application Support/tmux-ai-pet"
+support_dir="${HOME}/Library/Application Support/tmuxpal"
 events_file="${support_dir}/events.jsonl"
 mkdir -p "$support_dir"
 

@@ -20,7 +20,7 @@ public struct BubbleRunClassifier: Sendable {
 
         let fullText = [
             bubble.summary,
-            bubble.pane.transcriptSnippet,
+            bubble.pane.transcriptExcerpt,
             bubble.pane.transcriptTail,
             bubble.pane.title
         ].joined(separator: "\n").lowercased()

@@ -25,7 +25,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TmuxAiPet-release
+          name: TmuxPal-release
           path: dist/release/*
 
       - name: Publish GitHub Release

@@ -33,9 +33,9 @@ public struct BubbleSummarizer: Sendable {
             return "\(headline)\n終了"
         }
 
-        let snippet = clean(pane.transcriptSnippet)
-        if !snippet.isEmpty, !isNoise(snippet, pane: pane) {
-            return "\(headline)\n\(snippet)"
+        let excerpt = clean(pane.transcriptExcerpt)
+        if !excerpt.isEmpty, !isNoise(excerpt, pane: pane) {
+            return "\(headline)\n\(excerpt)"
         }
 
         let cleanedTitle = clean(pane.title)

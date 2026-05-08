@@ -1,6 +1,6 @@
 PREFIX ?= /usr/local
 BUILD_DIR := .build/release
-BIN := $(BUILD_DIR)/tmux-ai-pet
+BIN := $(BUILD_DIR)/tmuxpal
 
 .PHONY: build test run app install-agent uninstall-agent install-hooks uninstall-hooks clean
 
@@ -11,7 +11,7 @@ test:
 	SWIFTPM_DISABLE_SANDBOX=1 swift test --disable-sandbox
 
 run:
-	swift run tmux-ai-pet
+	swift run tmuxpal
 
 app:
 	./Scripts/build_app.sh

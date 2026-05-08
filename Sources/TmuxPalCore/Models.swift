@@ -48,7 +48,7 @@ public struct TmuxPane: Identifiable, Codable, Equatable, Sendable {
     public let active: Bool
     public let title: String
     public let commandLine: String
-    public let transcriptSnippet: String
+    public let transcriptExcerpt: String
     public let transcriptTail: String
     public let tool: AiTool
     public let status: PaneStatus
@@ -68,7 +68,7 @@ public struct TmuxPane: Identifiable, Codable, Equatable, Sendable {
         active: Bool,
         title: String,
         commandLine: String,
-        transcriptSnippet: String = "",
+        transcriptExcerpt: String = "",
         transcriptTail: String = "",
         tool: AiTool,
         status: PaneStatus,
@@ -87,14 +87,14 @@ public struct TmuxPane: Identifiable, Codable, Equatable, Sendable {
         self.active = active
         self.title = title
         self.commandLine = commandLine
-        self.transcriptSnippet = transcriptSnippet
+        self.transcriptExcerpt = transcriptExcerpt
         self.transcriptTail = transcriptTail
         self.tool = tool
         self.status = status
         self.observedAt = observedAt
     }
 
-    public func withTranscript(snippet: String, tail: String) -> TmuxPane {
+    public func withTranscript(excerpt: String, tail: String) -> TmuxPane {
         TmuxPane(
             sessionName: sessionName,
             windowIndex: windowIndex,
@@ -109,7 +109,7 @@ public struct TmuxPane: Identifiable, Codable, Equatable, Sendable {
             active: active,
             title: title,
             commandLine: commandLine,
-            transcriptSnippet: snippet,
+            transcriptExcerpt: excerpt,
             transcriptTail: tail,
             tool: tool,
             status: status,

@@ -1,7 +1,7 @@
 import XCTest
-@testable import TmuxAiPetCore
+@testable import TmuxPalCore
 
-final class TmuxAiPetCoreTests: XCTestCase {
+final class TmuxPalCoreTests: XCTestCase {
     func testDetectsAiToolsFromTmuxRows() throws {
         let fixture = try String(contentsOfFile: fixturePath("list-panes.txt"), encoding: .utf8)
         let panes = TmuxCollector().parseListPanes(fixture)
@@ -164,7 +164,7 @@ final class TmuxAiPetCoreTests: XCTestCase {
             active: true,
             title: "repo",
             commandLine: command,
-            transcriptSnippet: transcriptTail,
+            transcriptExcerpt: transcriptTail,
             transcriptTail: transcriptTail,
             tool: .codex,
             status: .selected

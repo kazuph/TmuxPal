@@ -1,13 +1,13 @@
 import Foundation
 
 public enum AppSupport {
-    public static let bundleIdentifier = "dev.tmux-ai-pet"
-    public static let appName = "tmux-ai-pet"
+    public static let bundleIdentifier = "dev.tmuxpal"
+    public static let appName = "tmuxpal"
 
     public static var supportDirectory: URL {
         FileManager.default
             .homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/tmux-ai-pet")
+            .appendingPathComponent("Library/Application Support/tmuxpal")
     }
 
     public static func ensureSupportDirectory() throws {

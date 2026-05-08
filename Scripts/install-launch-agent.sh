@@ -2,9 +2,9 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
-app_path="$repo_dir/dist/TmuxAiPet.app"
+app_path="$repo_dir/dist/TmuxPal.app"
 launcher_path="$repo_dir/Scripts/run-launch-agent.sh"
-label="dev.tmux-ai-pet"
+label="dev.tmuxpal"
 plist_path="$HOME/Library/LaunchAgents/${label}.plist"
 
 if [[ ! -d "$app_path" ]]; then
@@ -30,9 +30,9 @@ cat > "$plist_path" <<PLIST
   <key>KeepAlive</key>
   <false/>
   <key>StandardOutPath</key>
-  <string>${HOME}/Library/Logs/tmux-ai-pet.out.log</string>
+  <string>${HOME}/Library/Logs/tmuxpal.out.log</string>
   <key>StandardErrorPath</key>
-  <string>${HOME}/Library/Logs/tmux-ai-pet.err.log</string>
+  <string>${HOME}/Library/Logs/tmuxpal.err.log</string>
 </dict>
 </plist>
 PLIST

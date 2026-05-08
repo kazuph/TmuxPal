@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import TmuxAiPetCore
+import TmuxPalCore
 
 if CommandLine.arguments.contains("--dump-panes") {
     let panes = (try? TmuxCollector().collect()) ?? []

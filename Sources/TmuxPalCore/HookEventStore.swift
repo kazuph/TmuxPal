@@ -10,7 +10,7 @@ public struct HookEventStore: Sendable {
     public static func defaultEventsURL() -> URL {
         FileManager.default
             .homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/tmux-ai-pet/events.jsonl")
+            .appendingPathComponent("Library/Application Support/tmuxpal/events.jsonl")
     }
 
     public func readRecent(limit: Int = 200) -> [TmuxHookEvent] {

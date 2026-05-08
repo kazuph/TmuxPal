@@ -3,18 +3,18 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>dev.tmux-ai-pet</string>
+  <string>dev.tmuxpal</string>
   <key>ProgramArguments</key>
   <array>
-    <string>__APP__/Contents/MacOS/TmuxAiPet</string>
+    <string>__APP__/Contents/MacOS/TmuxPal</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <false/>
   <key>StandardOutPath</key>
-  <string>__HOME__/Library/Logs/tmux-ai-pet.out.log</string>
+  <string>__HOME__/Library/Logs/tmuxpal.out.log</string>
   <key>StandardErrorPath</key>
-  <string>__HOME__/Library/Logs/tmux-ai-pet.err.log</string>
+  <string>__HOME__/Library/Logs/tmuxpal.err.log</string>
 </dict>
 </plist>

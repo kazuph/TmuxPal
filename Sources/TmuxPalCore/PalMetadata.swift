@@ -1,13 +1,13 @@
 import Foundation
 
-public struct PetRequest: Decodable, Sendable {
-    public let petId: String?
+public struct PalRequest: Decodable, Sendable {
+    public let palId: String?
     public let displayName: String
     public let rows: [AnimationRow]?
     public let spritesheetPath: String?
 
     enum CodingKeys: String, CodingKey {
-        case petId = "pet_id"
+        case palId = "pal_id"
         case id
         case displayName = "display_name"
         case manifestDisplayName = "displayName"
@@ -17,12 +17,12 @@ public struct PetRequest: Decodable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        petId = try container.decodeIfPresent(String.self, forKey: .petId)
+        palId = try container.decodeIfPresent(String.self, forKey: .palId)
             ?? container.decodeIfPresent(String.self, forKey: .id)
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
             ?? container.decodeIfPresent(String.self, forKey: .manifestDisplayName)
-            ?? petId
-            ?? "Pet"
+            ?? palId
+            ?? "Pal"
         rows = try container.decodeIfPresent([AnimationRow].self, forKey: .rows)
         spritesheetPath = try container.decodeIfPresent(String.self, forKey: .spritesheetPath)
     }
@@ -34,13 +34,13 @@ public struct AnimationRow: Decodable, Equatable, Sendable {
     public let frames: Int
 }
 
-public struct PetAssetConfig: Sendable {
+public struct PalAssetConfig: Sendable {
     public let spritesheetURL: URL
     public let metadataURL: URL
 
     public init(
         spritesheetURL: URL? = nil,
-        metadataURL: URL = URL(fileURLWithPath: "\(NSHomeDirectory())/.codex/pets/dokochan/pet.json")
+        metadataURL: URL = URL(fileURLWithPath: "\(NSHomeDirectory())/.codex/tmuxpal/characters/dokochan/pal.json")
     ) {
         self.metadataURL = metadataURL
         self.spritesheetURL = spritesheetURL ?? Self.defaultSpritesheetURL(metadataURL: metadataURL)
@@ -48,7 +48,7 @@ public struct PetAssetConfig: Sendable {
 
     private static func defaultSpritesheetURL(metadataURL: URL) -> URL {
         if let data = try? Data(contentsOf: metadataURL),
-           let request = try? JSONDecoder().decode(PetRequest.self, from: data),
+           let request = try? JSONDecoder().decode(PalRequest.self, from: data),
            let spritesheetPath = request.spritesheetPath,
            !spritesheetPath.isEmpty {
             let url = URL(
@@ -60,16 +60,16 @@ public struct PetAssetConfig: Sendable {
             }
         }
 
-        let png = URL(fileURLWithPath: "\(NSHomeDirectory())/.codex/pets/dokochan/spritesheet.png")
+        let png = URL(fileURLWithPath: "\(NSHomeDirectory())/.codex/tmuxpal/characters/dokochan/spritesheet.png")
         if FileManager.default.fileExists(atPath: png.path) {
             return png
         }
-        return URL(fileURLWithPath: "\(NSHomeDirectory())/.codex/pets/dokochan/spritesheet.webp")
+        return URL(fileURLWithPath: "\(NSHomeDirectory())/.codex/tmuxpal/characters/dokochan/spritesheet.webp")
     }
 
     public func loadRows() -> [AnimationRow] {
         guard let data = try? Data(contentsOf: metadataURL),
-              let request = try? JSONDecoder().decode(PetRequest.self, from: data) else {
+              let request = try? JSONDecoder().decode(PalRequest.self, from: data) else {
             return Self.defaultRows
         }
         return request.rows ?? Self.defaultRows

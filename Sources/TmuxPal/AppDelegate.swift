@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 import ServiceManagement
-import TmuxAiPetCore
+import TmuxPalCore
 import UniformTypeIdentifiers
 
 @MainActor
@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appServerManager = AppServerManager()
         self.appServerManager = appServerManager
         appServerManager.startIfAvailable()
+        TmuxHookInstaller.installHooks()
 
         configureStatusItem()
     }
@@ -38,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func configureStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "pet"
+        item.button?.title = "TmuxPal"
         statusItem = item
         rebuildStatusMenu()
     }
@@ -48,9 +49,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "表示/非表示", action: #selector(toggleOverlay), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "再読み込み", action: #selector(reloadOverlay), keyEquivalent: "r"))
         menu.addItem(.separator())
-        menu.addItem(petSelectionMenuItem())
-        menu.addItem(NSMenuItem(title: "デフォルトのどこちゃんに戻す", action: #selector(useDefaultPet), keyEquivalent: ""))
-        menu.addItem(petSizeMenuItem())
+        menu.addItem(palSelectionMenuItem())
+        menu.addItem(NSMenuItem(title: "デフォルトのどこちゃんに戻す", action: #selector(useDefaultPal), keyEquivalent: ""))
+        menu.addItem(palSizeMenuItem())
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "tmux hooks を再インストール", action: #selector(reinstallTmuxHooks), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "tmux hooks を削除", action: #selector(uninstallTmuxHooks), keyEquivalent: ""))
         menu.addItem(.separator())
         let loginItem = NSMenuItem(title: "ログイン時に起動", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.state = LoginItemManager.isEnabled ? .on : .off
@@ -60,22 +64,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = menu
     }
 
-    private func petSelectionMenuItem() -> NSMenuItem {
-        let rootItem = NSMenuItem(title: "ペットを選択", action: nil, keyEquivalent: "")
+    private func palSelectionMenuItem() -> NSMenuItem {
+        let rootItem = NSMenuItem(title: "パルを選択", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
-        let petDirectories = PetSettings.discoveredPetDirectories()
+        let palDirectories = PalSettings.discoveredPalDirectories()
 
-        if petDirectories.isEmpty {
-            submenu.addItem(NSMenuItem(title: "ファイルから選択...", action: #selector(selectPetFromFile), keyEquivalent: ""))
+        if palDirectories.isEmpty {
+            submenu.addItem(NSMenuItem(title: "ファイルから選択...", action: #selector(selectPalFromFile), keyEquivalent: ""))
         } else {
-            for directory in petDirectories {
+            for directory in palDirectories {
                 let item = NSMenuItem(
-                    title: PetSettings.displayName(forPetDirectory: directory),
-                    action: #selector(selectDiscoveredPet(_:)),
+                    title: PalSettings.displayName(forPalDirectory: directory),
+                    action: #selector(selectDiscoveredPal(_:)),
                     keyEquivalent: ""
                 )
                 item.representedObject = directory
-                item.state = PetSettings.selectedPetDirectory?.standardizedFileURL == directory.standardizedFileURL ? .on : .off
+                item.state = PalSettings.selectedPalDirectory?.standardizedFileURL == directory.standardizedFileURL ? .on : .off
                 submenu.addItem(item)
             }
         }
@@ -84,14 +88,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return rootItem
     }
 
-    private func petSizeMenuItem() -> NSMenuItem {
+    private func palSizeMenuItem() -> NSMenuItem {
         let rootItem = NSMenuItem(title: "サイズ", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
 
-        for size in PetDisplaySize.allCases {
-            let item = NSMenuItem(title: size.label, action: #selector(selectPetSize(_:)), keyEquivalent: "")
+        for size in PalDisplaySize.allCases {
+            let item = NSMenuItem(title: size.label, action: #selector(selectPalSize(_:)), keyEquivalent: "")
             item.representedObject = size.rawValue
-            item.state = PetSettings.displaySize == size ? .on : .off
+            item.state = PalSettings.displaySize == size ? .on : .off
             submenu.addItem(item)
         }
 
@@ -107,20 +111,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayController?.reloadNow()
     }
 
-    @objc private func selectDiscoveredPet(_ sender: NSMenuItem) {
+    @objc private func selectDiscoveredPal(_ sender: NSMenuItem) {
         guard let directory = sender.representedObject as? URL else {
             return
         }
-        PetSettings.selectedPetDirectory = directory
-        overlayController?.reloadPetAssets()
+        PalSettings.selectedPalDirectory = directory
+        overlayController?.reloadPalAssets()
         rebuildStatusMenu()
     }
 
-    @objc private func selectPetFromFile() {
+    @objc private func selectPalFromFile() {
         let panel = NSOpenPanel()
-        panel.title = "ペットを選択"
-        panel.message = "pet.json を含むフォルダ、または pet.json を選択してください。"
-        panel.directoryURL = PetSettings.defaultPetPickerDirectory()
+        panel.title = "パルを選択"
+        panel.message = "pal.json を含むフォルダ、または pal.json を選択してください。"
+        panel.directoryURL = PalSettings.defaultPalPickerDirectory()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -130,28 +134,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let directory = url.hasDirectoryPath ? url : url.deletingLastPathComponent()
-        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("pet.json").path) else {
-            DebugLog.write("pet selection ignored: pet.json not found in \(directory.path)")
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("pal.json").path) else {
+            DebugLog.write("pal selection ignored: pal.json not found in \(directory.path)")
             return
         }
-        PetSettings.selectedPetDirectory = directory
-        overlayController?.reloadPetAssets()
+        PalSettings.selectedPalDirectory = directory
+        overlayController?.reloadPalAssets()
         rebuildStatusMenu()
     }
 
-    @objc private func useDefaultPet() {
-        PetSettings.selectedPetDirectory = nil
-        overlayController?.reloadPetAssets()
+    @objc private func useDefaultPal() {
+        PalSettings.selectedPalDirectory = nil
+        overlayController?.reloadPalAssets()
         rebuildStatusMenu()
     }
 
-    @objc private func selectPetSize(_ sender: NSMenuItem) {
+    @objc private func selectPalSize(_ sender: NSMenuItem) {
         guard let rawValue = sender.representedObject as? String,
-              let size = PetDisplaySize(rawValue: rawValue) else {
+              let size = PalDisplaySize(rawValue: rawValue) else {
             return
         }
-        PetSettings.displaySize = size
-        overlayController?.setPetDisplaySize(size)
+        PalSettings.displaySize = size
+        overlayController?.setPalDisplaySize(size)
         rebuildStatusMenu()
     }
 
@@ -162,6 +166,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             DebugLog.write("login item toggle failed: \(error.localizedDescription)")
         }
+    }
+
+    @objc private func reinstallTmuxHooks() {
+        TmuxHookInstaller.installHooks()
+    }
+
+    @objc private func uninstallTmuxHooks() {
+        TmuxHookInstaller.uninstallHooks()
     }
 
     @objc private func quit() {
@@ -181,44 +193,44 @@ enum SingleInstanceGuard {
     }
 }
 
-enum PetSettings {
-    private static let selectedPetDirectoryKey = "selectedPetDirectory"
-    private static let displaySizeKey = "petDisplaySize"
-    private static let userPetRoot = FileManager.default
+enum PalSettings {
+    private static let selectedPalDirectoryKey = "selectedPalDirectory"
+    private static let displaySizeKey = "palDisplaySize"
+    private static let userCharacterRoot = FileManager.default
         .homeDirectoryForCurrentUser
-        .appendingPathComponent(".codex/pets")
+        .appendingPathComponent(".codex/tmuxpal/characters")
 
-    static var selectedPetDirectory: URL? {
+    static var selectedPalDirectory: URL? {
         get {
-            guard let path = UserDefaults.standard.string(forKey: selectedPetDirectoryKey), !path.isEmpty else {
+            guard let path = UserDefaults.standard.string(forKey: selectedPalDirectoryKey), !path.isEmpty else {
                 return nil
             }
             return URL(fileURLWithPath: path)
         }
         set {
             if let newValue {
-                UserDefaults.standard.set(newValue.path, forKey: selectedPetDirectoryKey)
+                UserDefaults.standard.set(newValue.path, forKey: selectedPalDirectoryKey)
             } else {
-                UserDefaults.standard.removeObject(forKey: selectedPetDirectoryKey)
+                UserDefaults.standard.removeObject(forKey: selectedPalDirectoryKey)
             }
         }
     }
 
-    static func assetConfig() -> PetAssetConfig {
-        if let selected = selectedPetDirectory,
-           FileManager.default.fileExists(atPath: selected.appendingPathComponent("pet.json").path) {
-            return PetAssetConfig(metadataURL: selected.appendingPathComponent("pet.json"))
+    static func assetConfig() -> PalAssetConfig {
+        if let selected = selectedPalDirectory,
+           FileManager.default.fileExists(atPath: selected.appendingPathComponent("pal.json").path) {
+            return PalAssetConfig(metadataURL: selected.appendingPathComponent("pal.json"))
         }
         if let bundled = bundledDokochanDirectory() {
-            return PetAssetConfig(metadataURL: bundled.appendingPathComponent("pet.json"))
+            return PalAssetConfig(metadataURL: bundled.appendingPathComponent("pal.json"))
         }
-        return PetAssetConfig()
+        return PalAssetConfig()
     }
 
-    static var displaySize: PetDisplaySize {
+    static var displaySize: PalDisplaySize {
         get {
             guard let rawValue = UserDefaults.standard.string(forKey: displaySizeKey),
-                  let size = PetDisplaySize(rawValue: rawValue) else {
+                  let size = PalDisplaySize(rawValue: rawValue) else {
                 return .small
             }
             return size
@@ -228,9 +240,9 @@ enum PetSettings {
         }
     }
 
-    static func discoveredPetDirectories() -> [URL] {
+    static func discoveredPalDirectories() -> [URL] {
         guard let children = try? FileManager.default.contentsOfDirectory(
-            at: userPetRoot,
+            at: userCharacterRoot,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         ) else {
@@ -240,40 +252,40 @@ enum PetSettings {
         return children
             .filter { url in
                 (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-                    && FileManager.default.fileExists(atPath: url.appendingPathComponent("pet.json").path)
+                    && FileManager.default.fileExists(atPath: url.appendingPathComponent("pal.json").path)
             }
-            .sorted { displayName(forPetDirectory: $0).localizedCaseInsensitiveCompare(displayName(forPetDirectory: $1)) == .orderedAscending }
+            .sorted { displayName(forPalDirectory: $0).localizedCaseInsensitiveCompare(displayName(forPalDirectory: $1)) == .orderedAscending }
     }
 
-    static func defaultPetPickerDirectory() -> URL {
-        if FileManager.default.fileExists(atPath: userPetRoot.path) {
-            return userPetRoot
+    static func defaultPalPickerDirectory() -> URL {
+        if FileManager.default.fileExists(atPath: userCharacterRoot.path) {
+            return userCharacterRoot
         }
         return FileManager.default.homeDirectoryForCurrentUser
     }
 
-    static func displayName(forPetDirectory directory: URL) -> String {
-        let metadataURL = directory.appendingPathComponent("pet.json")
+    static func displayName(forPalDirectory directory: URL) -> String {
+        let metadataURL = directory.appendingPathComponent("pal.json")
         if let data = try? Data(contentsOf: metadataURL),
-           let request = try? JSONDecoder().decode(PetRequest.self, from: data) {
+           let request = try? JSONDecoder().decode(PalRequest.self, from: data) {
             return request.displayName
         }
         return directory.lastPathComponent
     }
 
     private static func bundledDokochanDirectory() -> URL? {
-        let subdirectory = "Pets/dokochan"
-        if let url = Bundle.main.url(forResource: "pet", withExtension: "json", subdirectory: subdirectory) {
+        let subdirectory = "Characters/dokochan"
+        if let url = Bundle.main.url(forResource: "pal", withExtension: "json", subdirectory: subdirectory) {
             return url.deletingLastPathComponent()
         }
-        if let url = Bundle.module.url(forResource: "pet", withExtension: "json", subdirectory: subdirectory) {
+        if let url = Bundle.module.url(forResource: "pal", withExtension: "json", subdirectory: subdirectory) {
             return url.deletingLastPathComponent()
         }
         return nil
     }
 }
 
-enum PetDisplaySize: String, CaseIterable {
+enum PalDisplaySize: String, CaseIterable {
     case small
     case medium
     case large
@@ -289,8 +301,8 @@ enum PetDisplaySize: String, CaseIterable {
     var scale: CGFloat {
         switch self {
         case .small: return 1.0
-        case .medium: return 1.2
-        case .large: return 1.4
+        case .medium: return 2.0
+        case .large: return 3.0
         }
     }
 }
@@ -309,6 +321,130 @@ enum LoginItemManager {
     }
 }
 
+enum TmuxHookInstaller {
+    private static let hookNames = [
+        "after-new-window",
+        "after-split-window",
+        "after-select-window",
+        "after-select-pane",
+        "pane-exited",
+        "pane-died"
+    ]
+
+    static func installHooks() {
+        guard let tmux = tmuxExecutable() else {
+            DebugLog.write("tmux hook install skipped: tmux executable not found")
+            return
+        }
+        guard let script = hookScriptURL() else {
+            DebugLog.write("tmux hook install skipped: tmuxpal-hook.sh not found")
+            return
+        }
+
+        makeExecutableIfNeeded(script)
+        let slot = hookSlot()
+        for hookName in hookNames {
+            _ = run(tmux, arguments: ["set-hook", "-gu", "\(hookName)[\(slot)]"])
+            let command = "run-shell -b '\"\(script.path)\" \"\(hookName)\" \"#{session_name}\" \"#{window_index}\" \"#{window_id}\" \"#{pane_index}\" \"#{pane_id}\" \"#{pane_current_command}\" \"#{pane_current_path}\" \"#{pane_title}\"'"
+            let result = run(tmux, arguments: ["set-hook", "-g", "\(hookName)[\(slot)]", command])
+            if result != 0 {
+                DebugLog.write("tmux hook install failed: \(hookName) exit=\(result)")
+            }
+        }
+        DebugLog.write("tmux hooks installed slot=\(slot) script=\(script.path)")
+    }
+
+    static func uninstallHooks() {
+        guard let tmux = tmuxExecutable() else {
+            DebugLog.write("tmux hook uninstall skipped: tmux executable not found")
+            return
+        }
+        let slot = hookSlot()
+        for hookName in hookNames {
+            _ = run(tmux, arguments: ["set-hook", "-gu", "\(hookName)[\(slot)]"])
+        }
+        DebugLog.write("tmux hooks removed slot=\(slot)")
+    }
+
+    private static func hookSlot() -> Int {
+        Int(ProcessInfo.processInfo.environment["TMUXPAL_HOOK_SLOT"] ?? "") ?? 900
+    }
+
+    private static func hookScriptURL() -> URL? {
+        if let bundled = Bundle.main.url(forResource: "tmuxpal-hook", withExtension: "sh") {
+            return bundled
+        }
+        if let module = Bundle.module.url(forResource: "tmuxpal-hook", withExtension: "sh") {
+            return module
+        }
+        let currentDirectory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let developmentScript = currentDirectory.appendingPathComponent("Scripts/tmuxpal-hook.sh")
+        if FileManager.default.fileExists(atPath: developmentScript.path) {
+            return developmentScript
+        }
+        return nil
+    }
+
+    private static func tmuxExecutable() -> URL? {
+        if let configured = ProcessInfo.processInfo.environment["TMUX_BIN"], FileManager.default.isExecutableFile(atPath: configured) {
+            return URL(fileURLWithPath: configured)
+        }
+
+        for path in ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"] {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return URL(fileURLWithPath: path)
+            }
+        }
+
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["sh", "-lc", "command -v tmux"]
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let path = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !path.isEmpty, FileManager.default.isExecutableFile(atPath: path) else {
+            return nil
+        }
+        return URL(fileURLWithPath: path)
+    }
+
+    private static func makeExecutableIfNeeded(_ url: URL) {
+        guard !FileManager.default.isExecutableFile(atPath: url.path) else {
+            return
+        }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+    }
+
+    @discardableResult
+    private static func run(_ executable: URL, arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        } catch {
+            DebugLog.write("tmux command failed: \(error.localizedDescription)")
+            return -1
+        }
+    }
+}
+
 @MainActor
 final class OverlayController {
     private let window: OverlayPanel
@@ -319,10 +455,10 @@ final class OverlayController {
     private var timer: Timer?
     private var lastLoggedBubbleCount: Int?
     private var isUpdating = false
-    private var petAnchorScreenCenter: CGPoint?
+    private var palAnchorScreenCenter: CGPoint?
 
     init() {
-        overlayView = OverlayView(petAssetConfig: PetSettings.assetConfig())
+        overlayView = OverlayView(palAssetConfig: PalSettings.assetConfig())
         window = OverlayPanel(
             contentRect: OverlayController.savedFrame(),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -366,7 +502,7 @@ final class OverlayController {
 
     func show() {
         clampToVisibleScreen()
-        petAnchorScreenCenter = petScreenCenter()
+        palAnchorScreenCenter = palScreenCenter()
         window.orderFrontRegardless()
         window.displayIfNeeded()
         DebugLog.write("overlay shown frame=\(NSStringFromRect(window.frame))")
@@ -379,17 +515,17 @@ final class OverlayController {
 
     func reloadNow() {
         updatePanes()
-        reloadPetAssets()
+        reloadPalAssets()
     }
 
-    func reloadPetAssets() {
-        overlayView.reloadPetAssets(config: PetSettings.assetConfig())
+    func reloadPalAssets() {
+        overlayView.reloadPalAssets(config: PalSettings.assetConfig())
     }
 
-    func setPetDisplaySize(_ size: PetDisplaySize) {
-        let petCenter = petScreenCenter()
-        overlayView.setPetScale(size.scale)
-        fitWindow(keepingPetCenter: petCenter)
+    func setPalDisplaySize(_ size: PalDisplaySize) {
+        let palCenter = palScreenCenter()
+        overlayView.setPalScale(size.scale)
+        fitWindow(keepingPalCenter: palCenter)
         saveFrame()
     }
 
@@ -440,7 +576,7 @@ final class OverlayController {
     private func applyBubbles(_ bubbles: [PaneBubble], paneCount: Int) {
         overlayView.setBubbles(bubbles)
         fitWindow()
-        if let snapshotPath = ProcessInfo.processInfo.environment["TMUX_AI_PET_SNAPSHOT_PATH"] {
+        if let snapshotPath = ProcessInfo.processInfo.environment["TMUXPAL_SNAPSHOT_PATH"] {
             overlayView.writeSnapshot(to: URL(fileURLWithPath: snapshotPath))
         }
         if lastLoggedBubbleCount != bubbles.count {
@@ -450,17 +586,17 @@ final class OverlayController {
     }
 
     private func fitWindow() {
-        fitWindow(keepingPetCenter: petAnchorScreenCenter ?? petScreenCenter())
+        fitWindow(keepingPalCenter: palAnchorScreenCenter ?? palScreenCenter())
     }
 
-    private func fitWindow(keepingPetCenter petCenter: CGPoint) {
-        updateBubbleLayout(forPetCenter: petCenter)
-        applyPreferredFrame(keepingPetCenter: petCenter)
-        petAnchorScreenCenter = clampToVisibleScreen()
-        let visiblePetCenter = petScreenCenter()
-        updateBubbleLayout(forPetCenter: visiblePetCenter)
-        applyPreferredFrame(keepingPetCenter: visiblePetCenter)
-        petAnchorScreenCenter = clampToVisibleScreen()
+    private func fitWindow(keepingPalCenter palCenter: CGPoint) {
+        updateBubbleLayout(forPalCenter: palCenter)
+        applyPreferredFrame(keepingPalCenter: palCenter)
+        palAnchorScreenCenter = clampToVisibleScreen()
+        let visiblePalCenter = palScreenCenter()
+        updateBubbleLayout(forPalCenter: visiblePalCenter)
+        applyPreferredFrame(keepingPalCenter: visiblePalCenter)
+        palAnchorScreenCenter = clampToVisibleScreen()
     }
 
     private func moveWindow(toScreenPoint screenPoint: CGPoint, grabOffset: CGPoint, horizontalDelta: CGFloat) {
@@ -469,8 +605,8 @@ final class OverlayController {
         frame.origin.y = screenPoint.y - grabOffset.y
         window.setFrame(frame, display: true)
         updateBubbleLayout()
-        applyPreferredFrame(keepingPetCenter: petScreenCenter())
-        petAnchorScreenCenter = clampToVisibleScreen()
+        applyPreferredFrame(keepingPalCenter: palScreenCenter())
+        palAnchorScreenCenter = clampToVisibleScreen()
         overlayView.setDragging(horizontalDelta: horizontalDelta)
         saveFrame()
     }
@@ -480,63 +616,63 @@ final class OverlayController {
     }
 
     @objc private func screenParametersDidChange() {
-        petAnchorScreenCenter = clampToVisibleScreen()
+        palAnchorScreenCenter = clampToVisibleScreen()
         saveFrame()
     }
 
     @discardableResult
     private func clampToVisibleScreen() -> CGPoint {
-        guard let screen = NSScreen.screens.first(where: { $0.visibleFrame.contains(petScreenCenter()) }) ?? NSScreen.main else {
-            return petScreenCenter()
+        guard let screen = NSScreen.screens.first(where: { $0.visibleFrame.contains(palScreenCenter()) }) ?? NSScreen.main else {
+            return palScreenCenter()
         }
         var frame = window.frame
         let visible = screen.visibleFrame
-        let pet = overlayView.petRectInBounds()
-        let petScreen = pet.offsetBy(dx: frame.minX, dy: frame.minY)
-        if petScreen.minX < visible.minX {
-            frame.origin.x += visible.minX - petScreen.minX
+        let pal = overlayView.palRectInBounds()
+        let palScreen = pal.offsetBy(dx: frame.minX, dy: frame.minY)
+        if palScreen.minX < visible.minX {
+            frame.origin.x += visible.minX - palScreen.minX
         }
-        if petScreen.maxX > visible.maxX {
-            frame.origin.x -= petScreen.maxX - visible.maxX
+        if palScreen.maxX > visible.maxX {
+            frame.origin.x -= palScreen.maxX - visible.maxX
         }
-        if petScreen.minY < visible.minY {
-            frame.origin.y += visible.minY - petScreen.minY
+        if palScreen.minY < visible.minY {
+            frame.origin.y += visible.minY - palScreen.minY
         }
-        if petScreen.maxY > visible.maxY {
-            frame.origin.y -= petScreen.maxY - visible.maxY
+        if palScreen.maxY > visible.maxY {
+            frame.origin.y -= palScreen.maxY - visible.maxY
         }
         window.setFrame(frame, display: true)
-        return petScreenCenter()
+        return palScreenCenter()
     }
 
-    private func applyPreferredFrame(keepingPetCenter petCenter: CGPoint) {
+    private func applyPreferredFrame(keepingPalCenter palCenter: CGPoint) {
         let desired = overlayView.preferredSize()
-        let petCenterInDesiredBounds = overlayView.petCenterInBounds(for: desired)
+        let palCenterInDesiredBounds = overlayView.palCenterInBounds(for: desired)
         var frame = window.frame
         frame.size = desired
-        frame.origin.x = petCenter.x - petCenterInDesiredBounds.x
-        frame.origin.y = petCenter.y - petCenterInDesiredBounds.y
+        frame.origin.x = palCenter.x - palCenterInDesiredBounds.x
+        frame.origin.y = palCenter.y - palCenterInDesiredBounds.y
         window.setFrame(frame, display: true)
     }
 
     private func updateBubbleLayout() {
-        updateBubbleLayout(forPetCenter: petScreenCenter())
+        updateBubbleLayout(forPalCenter: palScreenCenter())
     }
 
-    private func updateBubbleLayout(forPetCenter petCenter: CGPoint) {
-        guard let screen = NSScreen.screens.first(where: { $0.visibleFrame.contains(petCenter) }) ?? NSScreen.main else {
+    private func updateBubbleLayout(forPalCenter palCenter: CGPoint) {
+        guard let screen = NSScreen.screens.first(where: { $0.visibleFrame.contains(palCenter) }) ?? NSScreen.main else {
             return
         }
-        overlayView.updateBubbleLayout(petCenter: petCenter, visibleFrame: screen.visibleFrame)
+        overlayView.updateBubbleLayout(palCenter: palCenter, visibleFrame: screen.visibleFrame)
     }
 
-    private func petScreenCenter() -> CGPoint {
-        let pet = overlayView.petRectInBounds()
-        return CGPoint(x: window.frame.minX + pet.midX, y: window.frame.minY + pet.midY)
+    private func palScreenCenter() -> CGPoint {
+        let pal = overlayView.palRectInBounds()
+        return CGPoint(x: window.frame.minX + pal.midX, y: window.frame.minY + pal.midY)
     }
 
     private static func savedFrame() -> NSRect {
-        if ProcessInfo.processInfo.environment["TMUX_AI_PET_RESET_POSITION"] == "1" {
+        if ProcessInfo.processInfo.environment["TMUXPAL_RESET_POSITION"] == "1" {
             return defaultFrame()
         }
         if let text = UserDefaults.standard.string(forKey: "overlayFrame") {
@@ -571,11 +707,11 @@ private enum BubbleVerticalSide {
 
 @MainActor
 final class OverlayView: NSView {
-    static let basePetSize = NSSize(width: 77, height: 85)
+    static let basePalSize = NSSize(width: 77, height: 85)
     static let bubbleWidth: CGFloat = 280
     static let bubbleHeight: CGFloat = 76
     static let padding: CGFloat = 14
-    static let bubblePetGap: CGFloat = 18
+    static let bubblePalGap: CGFloat = 18
 
     var onDrag: ((_ screenPoint: CGPoint, _ grabOffset: CGPoint, _ horizontalDelta: CGFloat) -> Void)?
     var onClickPane: ((TmuxPane) -> Void)?
@@ -589,23 +725,23 @@ final class OverlayView: NSView {
     private var dragResetTimer: Timer?
     private var isHovering = false
     private var isDragging = false
-    private var isCollapsed = ProcessInfo.processInfo.environment["TMUX_AI_PET_COLLAPSED"] == "1"
+    private var isCollapsed = ProcessInfo.processInfo.environment["TMUXPAL_COLLAPSED"] == "1"
         || UserDefaults.standard.bool(forKey: "bubblesCollapsed")
     private var animationState = "idle"
     private var lastHorizontalDragState = "running-right"
     private var frameIndex = 0
-    private var framesByState: [String: [PetFrame]] = [:]
+    private var framesByState: [String: [PalFrame]] = [:]
     private var animationTimer: Timer?
-    private var petAssetConfig: PetAssetConfig
-    private var petScale = PetSettings.displaySize.scale
+    private var palAssetConfig: PalAssetConfig
+    private var palScale = PalSettings.displaySize.scale
     private let runClassifier = BubbleRunClassifier()
     private var bubbleHorizontalSide: BubbleHorizontalSide = .left
     private var bubbleVerticalSide: BubbleVerticalSide = .above
 
-    init(frame frameRect: NSRect = .zero, petAssetConfig: PetAssetConfig) {
-        self.petAssetConfig = petAssetConfig
+    init(frame frameRect: NSRect = .zero, palAssetConfig: PalAssetConfig) {
+        self.palAssetConfig = palAssetConfig
         super.init(frame: frameRect)
-        reloadPetAssets()
+        reloadPalAssets()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 0.16, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.advanceAnimation()
@@ -626,19 +762,19 @@ final class OverlayView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private var petSize: NSSize {
+    private var palSize: NSSize {
         NSSize(
-            width: Self.basePetSize.width * petScale,
-            height: Self.basePetSize.height * petScale
+            width: Self.basePalSize.width * palScale,
+            height: Self.basePalSize.height * palScale
         )
     }
 
-    static func size(forBubbleCount count: Int, collapsed: Bool, petSize: NSSize) -> NSSize {
+    static func size(forBubbleCount count: Int, collapsed: Bool, palSize: NSSize) -> NSSize {
         if collapsed {
-            return NSSize(width: petSize.width + padding * 2, height: petSize.height + padding * 2)
+            return NSSize(width: palSize.width + padding * 2, height: palSize.height + padding * 2)
         }
         let bubbleStackHeight = Self.bubbleStackHeight(for: count)
-        let height = petSize.height + bubbleStackHeight + padding * 2 + bubblePetGap
+        let height = palSize.height + bubbleStackHeight + padding * 2 + bubblePalGap
         return NSSize(width: bubbleWidth + padding * 2, height: height)
     }
 
@@ -647,49 +783,49 @@ final class OverlayView: NSView {
     }
 
     func preferredSize() -> NSSize {
-        Self.size(forBubbleCount: max(1, min(6, bubbles.count)), collapsed: isCollapsed, petSize: petSize)
+        Self.size(forBubbleCount: max(1, min(6, bubbles.count)), collapsed: isCollapsed, palSize: palSize)
     }
 
-    func updateBubbleLayout(petCenter: CGPoint, visibleFrame: NSRect) {
+    func updateBubbleLayout(palCenter: CGPoint, visibleFrame: NSRect) {
         guard !isCollapsed else { return }
         let count = max(1, min(6, bubbles.count))
         let stackHeight = Self.bubbleStackHeight(for: count)
         let requiredHorizontal = Self.bubbleWidth + Self.padding * 2
         let requiredVertical = stackHeight + Self.padding
-        let size = petSize
-        bubbleHorizontalSide = petCenter.x - size.width / 2 - requiredHorizontal < visibleFrame.minX ? .right : .left
-        bubbleVerticalSide = petCenter.y + size.height / 2 + requiredVertical > visibleFrame.maxY ? .below : .above
-        if petCenter.y - size.height / 2 - requiredVertical < visibleFrame.minY {
+        let size = palSize
+        bubbleHorizontalSide = palCenter.x - size.width / 2 - requiredHorizontal < visibleFrame.minX ? .right : .left
+        bubbleVerticalSide = palCenter.y + size.height / 2 + requiredVertical > visibleFrame.maxY ? .below : .above
+        if palCenter.y - size.height / 2 - requiredVertical < visibleFrame.minY {
             bubbleVerticalSide = .above
         }
         needsDisplay = true
     }
 
-    func petRectInBounds() -> NSRect {
-        petRect()
+    func palRectInBounds() -> NSRect {
+        palRect()
     }
 
-    func petCenterInBounds() -> CGPoint {
-        let pet = petRect()
-        return CGPoint(x: pet.midX, y: pet.midY)
+    func palCenterInBounds() -> CGPoint {
+        let pal = palRect()
+        return CGPoint(x: pal.midX, y: pal.midY)
     }
 
-    func petCenterInBounds(for size: NSSize) -> CGPoint {
-        let pet = petRect(in: NSRect(origin: .zero, size: size))
-        return CGPoint(x: pet.midX, y: pet.midY)
+    func palCenterInBounds(for size: NSSize) -> CGPoint {
+        let pal = palRect(in: NSRect(origin: .zero, size: size))
+        return CGPoint(x: pal.midX, y: pal.midY)
     }
 
-    func reloadPetAssets(config: PetAssetConfig? = nil) {
+    func reloadPalAssets(config: PalAssetConfig? = nil) {
         if let config {
-            petAssetConfig = config
+            palAssetConfig = config
         }
-        framesByState = PetSpriteLoader(config: petAssetConfig).loadFrames()
-        DebugLog.write("pet assets loaded states=\(framesByState.keys.sorted().joined(separator: ","))")
+        framesByState = PalSpriteLoader(config: palAssetConfig).loadFrames()
+        DebugLog.write("pal assets loaded states=\(framesByState.keys.sorted().joined(separator: ","))")
         needsDisplay = true
     }
 
-    func setPetScale(_ scale: CGFloat) {
-        petScale = scale
+    func setPalScale(_ scale: CGFloat) {
+        palScale = scale
         needsDisplay = true
     }
 
@@ -741,7 +877,7 @@ final class OverlayView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        drawPet()
+        drawPal()
         if isCollapsed {
             drawCollapsedBadge()
         } else {
@@ -761,29 +897,29 @@ final class OverlayView: NSView {
         try? data.write(to: url)
     }
 
-    private func drawPet() {
-        let petRect = petRect()
+    private func drawPal() {
+        let palRect = palRect()
         let frames = framesByState[animationState] ?? framesByState["idle"] ?? []
         if let frame = frames.isEmpty ? nil : frames[frameIndex % frames.count] {
-            frame.draw(in: petRect)
+            frame.draw(in: palRect)
         } else {
             NSColor.systemGreen.withAlphaComponent(0.25).setFill()
-            petRect.fill()
+            palRect.fill()
         }
     }
 
     private func drawBubbles() {
         bubbleRects.removeAll()
         let visibleBubbles = bubbles.isEmpty ? [placeholderBubble()] : Array(bubbles.prefix(6))
-        let pet = petRect()
+        let pal = palRect()
         let startX = bubbleHorizontalSide == .left
-            ? pet.maxX - Self.bubbleWidth
-            : pet.minX
+            ? pal.maxX - Self.bubbleWidth
+            : pal.minX
         var y: CGFloat
         if bubbleVerticalSide == .above {
-            y = pet.maxY + Self.bubblePetGap + Self.bubbleStackHeight(for: visibleBubbles.count) - Self.bubbleHeight
+            y = pal.maxY + Self.bubblePalGap + Self.bubbleStackHeight(for: visibleBubbles.count) - Self.bubbleHeight
         } else {
-            y = pet.minY - Self.bubblePetGap - Self.bubbleHeight
+            y = pal.minY - Self.bubblePalGap - Self.bubbleHeight
         }
 
         for bubble in visibleBubbles {
@@ -879,11 +1015,11 @@ final class OverlayView: NSView {
 
     private func drawCollapsedBadge() {
         let count = runningTaskCount()
-        let pet = petRect()
+        let pal = palRect()
         let badgeSize: CGFloat = 28
         let rect = NSRect(
-            x: pet.midX + petSize.width * 0.04,
-            y: pet.midY + petSize.height * 0.10,
+            x: pal.midX + palSize.width * 0.04,
+            y: pal.midY + palSize.height * 0.10,
             width: badgeSize,
             height: badgeSize
         )
@@ -931,12 +1067,12 @@ final class OverlayView: NSView {
         return PaneBubble(pane: pane, summary: "tmux AI pane を待機中")
     }
 
-    private func petRect() -> NSRect {
-        petRect(in: bounds)
+    private func palRect() -> NSRect {
+        palRect(in: bounds)
     }
 
-    private func petRect(in bounds: NSRect) -> NSRect {
-        let size = petSize
+    private func palRect(in bounds: NSRect) -> NSRect {
+        let size = palSize
         if isCollapsed {
             return NSRect(x: Self.padding, y: Self.padding, width: size.width, height: size.height)
         }
@@ -1013,7 +1149,7 @@ final class OverlayView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if !didDrag, petRect().contains(point) {
+        if !didDrag, palRect().contains(point) {
             toggleCollapsed()
         } else if !didDrag {
             for (rect, pane) in bubbleRects where rect.contains(point) && pane.paneId != "%placeholder" {
@@ -1131,7 +1267,7 @@ private extension String {
     }
 }
 
-struct PetFrame {
+struct PalFrame {
     let image: NSImage
 
     func draw(in rect: NSRect) {
@@ -1139,26 +1275,26 @@ struct PetFrame {
     }
 }
 
-struct PetSpriteLoader {
-    let config: PetAssetConfig
+struct PalSpriteLoader {
+    let config: PalAssetConfig
     let cellWidth: CGFloat = 192
     let cellHeight: CGFloat = 208
 
-    func loadFrames() -> [String: [PetFrame]] {
-        DebugLog.write("loading pet spritesheet=\(config.spritesheetURL.path)")
+    func loadFrames() -> [String: [PalFrame]] {
+        DebugLog.write("loading pal spritesheet=\(config.spritesheetURL.path)")
         guard let sheet = NSImage(contentsOf: config.spritesheetURL),
               let cgImage = sheet.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return [:]
         }
 
-        var result: [String: [PetFrame]] = [:]
+        var result: [String: [PalFrame]] = [:]
         for row in config.loadRows() {
-            var frames: [PetFrame] = []
+            var frames: [PalFrame] = []
             for frame in 0..<row.frames {
                 let crop = CGRect(x: CGFloat(frame) * cellWidth, y: CGFloat(row.row) * cellHeight, width: cellWidth, height: cellHeight)
                 if let cropped = cgImage.cropping(to: crop) {
                     let image = NSImage(cgImage: cropped, size: NSSize(width: cellWidth, height: cellHeight))
-                    frames.append(PetFrame(image: image))
+                    frames.append(PalFrame(image: image))
                 }
             }
             result[row.state] = frames
@@ -1173,7 +1309,7 @@ final class AppServerManager {
     func startIfAvailable() {
         guard process == nil else { return }
         let codexCandidates = [
-            ProcessInfo.processInfo.environment["TMUX_AI_PET_CODEX_PATH"],
+            ProcessInfo.processInfo.environment["TMUXPAL_CODEX_PATH"],
             Self.findExecutable("codex"),
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex"
@@ -1221,7 +1357,7 @@ final class AppServerManager {
 enum DebugLog {
     private static let url = FileManager.default
         .homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Logs/tmux-ai-pet.debug.log")
+        .appendingPathComponent("Library/Logs/tmuxpal.debug.log")
 
     static func write(_ message: String) {
         let line = "[\(ISO8601DateFormatter().string(from: Date()))] \(message)\n"

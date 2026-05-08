@@ -2,22 +2,22 @@
 import PackageDescription
 
 let package = Package(
-    name: "tmux-ai-pet",
+    name: "tmuxpal",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "tmux-ai-pet", targets: ["TmuxAiPet"]),
-        .library(name: "TmuxAiPetCore", targets: ["TmuxAiPetCore"])
+        .executable(name: "tmuxpal", targets: ["TmuxPal"]),
+        .library(name: "TmuxPalCore", targets: ["TmuxPalCore"])
     ],
     targets: [
-        .target(name: "TmuxAiPetCore"),
+        .target(name: "TmuxPalCore"),
         .executableTarget(
-            name: "TmuxAiPet",
-            dependencies: ["TmuxAiPetCore"],
+            name: "TmuxPal",
+            dependencies: ["TmuxPalCore"],
             resources: [.copy("Resources")]
         ),
         .testTarget(
-            name: "TmuxAiPetTests",
-            dependencies: ["TmuxAiPetCore"],
+            name: "TmuxPalTests",
+            dependencies: ["TmuxPalCore"],
             resources: [.copy("Resources")]
         )
     ]

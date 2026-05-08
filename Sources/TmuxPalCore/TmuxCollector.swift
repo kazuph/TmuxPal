@@ -105,7 +105,7 @@ public struct TmuxCollector: Sendable {
                 let pane = parseLine(text) ?? parseLine(text, commandLineOverride: processCommandLines(forTmuxLine: text))
                 if let pane {
                     let transcript = captureTranscript(for: pane.paneId)
-                    return pane.withTranscript(snippet: summarizeTranscript(transcript), tail: transcript)
+                    return pane.withTranscript(excerpt: summarizeTranscript(transcript), tail: transcript)
                 }
                 return nil
             }
@@ -262,7 +262,7 @@ public struct TmuxCollector: Sendable {
     }
 
     private static func defaultSocketPath() -> String? {
-        if let explicit = ProcessInfo.processInfo.environment["TMUX_AI_PET_TMUX_SOCKET"], !explicit.isEmpty {
+        if let explicit = ProcessInfo.processInfo.environment["TMUXPAL_TMUX_SOCKET"], !explicit.isEmpty {
             return explicit
         }
         let uid = getuid()
