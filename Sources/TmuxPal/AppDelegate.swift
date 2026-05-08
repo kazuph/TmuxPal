@@ -749,7 +749,9 @@ final class OverlayView: NSView {
     static let bubbleWidth: CGFloat = 280
     static let bubbleHeight: CGFloat = 76
     static let padding: CGFloat = 14
-    static let bubblePalGap: CGFloat = 18
+    static let expandedEdgePadding: CGFloat = 4
+    static let bubblePalGap: CGFloat = 8
+    static let expandedTransparentTopCompensationRatio: CGFloat = 0.24
     static let collapsedBadgeSize: CGFloat = 28
     static let collapsedBadgeRightOutset: CGFloat = 32
     static let collapsedBadgeTopOutset: CGFloat = 14
@@ -820,8 +822,16 @@ final class OverlayView: NSView {
             )
         }
         let bubbleStackHeight = Self.bubbleStackHeight(for: count)
-        let height = palSize.height + bubbleStackHeight + padding * 2 + bubblePalGap
+        let height = palSize.height
+            + bubbleStackHeight
+            + padding * 2
+            + bubblePalGap
+            - expandedTransparentTopCompensation(for: palSize)
         return NSSize(width: bubbleWidth + padding * 2, height: height)
+    }
+
+    static func expandedTransparentTopCompensation(for palSize: NSSize) -> CGFloat {
+        palSize.height * expandedTransparentTopCompensationRatio
     }
 
     static func bubbleStackHeight(for count: Int) -> CGFloat {
@@ -963,7 +973,8 @@ final class OverlayView: NSView {
             : pal.minX
         var y: CGFloat
         if bubbleVerticalSide == .above {
-            y = pal.maxY + Self.bubblePalGap + Self.bubbleStackHeight(for: visibleBubbles.count) - Self.bubbleHeight
+            let visualTop = pal.maxY - Self.expandedTransparentTopCompensation(for: palSize)
+            y = visualTop + Self.bubblePalGap + Self.bubbleStackHeight(for: visibleBubbles.count) - Self.bubbleHeight
         } else {
             y = pal.minY - Self.bubblePalGap - Self.bubbleHeight
         }
@@ -1123,8 +1134,8 @@ final class OverlayView: NSView {
             return NSRect(x: Self.padding, y: Self.padding, width: size.width, height: size.height)
         }
         let x = bubbleHorizontalSide == .left
-            ? bounds.width - Self.padding - size.width
-            : Self.padding
+            ? bounds.width - Self.expandedEdgePadding - size.width
+            : Self.expandedEdgePadding
         let y = bubbleVerticalSide == .above
             ? Self.padding
             : bounds.height - Self.padding - size.height
