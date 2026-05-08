@@ -6,15 +6,17 @@ build_dir="$repo_dir/.build/release"
 app_dir="$repo_dir/dist/TmuxAiPet.app"
 contents_dir="$app_dir/Contents"
 macos_dir="$contents_dir/MacOS"
+resources_dir="$contents_dir/Resources"
 
 cd "$repo_dir"
 SWIFTPM_DISABLE_SANDBOX=1 swift build -c release --disable-sandbox
 
 rm -rf "$app_dir"
-mkdir -p "$macos_dir"
+mkdir -p "$macos_dir" "$resources_dir"
 cp "$build_dir/tmux-ai-pet" "$macos_dir/TmuxAiPet"
+cp -R "$repo_dir/Sources/TmuxAiPet/Resources/." "$resources_dir/"
 
-cat > "$contents_dir/Info.plist" <<'PLIST'
+cat > "$contents_dir/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -28,7 +30,7 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>${TMUX_AI_PET_VERSION:-0.1.0}</string>
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>LSMinimumSystemVersion</key>

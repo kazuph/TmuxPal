@@ -12,7 +12,8 @@ let package = Package(
         .target(name: "TmuxAiPetCore"),
         .executableTarget(
             name: "TmuxAiPet",
-            dependencies: ["TmuxAiPetCore"]
+            dependencies: ["TmuxAiPetCore"],
+            resources: [.copy("Resources")]
         ),
         .testTarget(
             name: "TmuxAiPetTests",

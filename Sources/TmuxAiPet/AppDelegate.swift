@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
+import ServiceManagement
 import TmuxAiPetCore
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -32,14 +34,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configureStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "pet"
+        statusItem = item
+        rebuildStatusMenu()
+    }
 
+    private func rebuildStatusMenu() {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "表示/非表示", action: #selector(toggleOverlay), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "再読み込み", action: #selector(reloadOverlay), keyEquivalent: "r"))
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "ペットを選択...", action: #selector(selectPet), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "デフォルトのどこちゃんに戻す", action: #selector(useDefaultPet), keyEquivalent: ""))
+        menu.addItem(.separator())
+        let loginItem = NSMenuItem(title: "ログイン時に起動", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        loginItem.state = LoginItemManager.isEnabled ? .on : .off
+        menu.addItem(loginItem)
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "終了", action: #selector(quit), keyEquivalent: "q"))
-        item.menu = menu
-        statusItem = item
+        statusItem?.menu = menu
     }
 
     @objc private func toggleOverlay() {
@@ -50,8 +62,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayController?.reloadNow()
     }
 
+    @objc private func selectPet() {
+        let panel = NSOpenPanel()
+        panel.title = "ペットを選択"
+        panel.message = "pet.json を含むフォルダ、または pet.json を選択してください。"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.json]
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+        let directory = url.hasDirectoryPath ? url : url.deletingLastPathComponent()
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("pet.json").path) else {
+            DebugLog.write("pet selection ignored: pet.json not found in \(directory.path)")
+            return
+        }
+        PetSettings.selectedPetDirectory = directory
+        overlayController?.reloadPetAssets()
+    }
+
+    @objc private func useDefaultPet() {
+        PetSettings.selectedPetDirectory = nil
+        overlayController?.reloadPetAssets()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        do {
+            try LoginItemManager.setEnabled(!LoginItemManager.isEnabled)
+            rebuildStatusMenu()
+        } catch {
+            DebugLog.write("login item toggle failed: \(error.localizedDescription)")
+        }
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+}
+
+enum PetSettings {
+    private static let selectedPetDirectoryKey = "selectedPetDirectory"
+
+    static var selectedPetDirectory: URL? {
+        get {
+            guard let path = UserDefaults.standard.string(forKey: selectedPetDirectoryKey), !path.isEmpty else {
+                return nil
+            }
+            return URL(fileURLWithPath: path)
+        }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue.path, forKey: selectedPetDirectoryKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: selectedPetDirectoryKey)
+            }
+        }
+    }
+
+    static func assetConfig() -> PetAssetConfig {
+        if let selected = selectedPetDirectory,
+           FileManager.default.fileExists(atPath: selected.appendingPathComponent("pet.json").path) {
+            return PetAssetConfig(metadataURL: selected.appendingPathComponent("pet.json"))
+        }
+        if let bundled = bundledDokochanDirectory() {
+            return PetAssetConfig(metadataURL: bundled.appendingPathComponent("pet.json"))
+        }
+        return PetAssetConfig()
+    }
+
+    private static func bundledDokochanDirectory() -> URL? {
+        let subdirectory = "Pets/dokochan"
+        if let url = Bundle.main.url(forResource: "pet", withExtension: "json", subdirectory: subdirectory) {
+            return url.deletingLastPathComponent()
+        }
+        if let url = Bundle.module.url(forResource: "pet", withExtension: "json", subdirectory: subdirectory) {
+            return url.deletingLastPathComponent()
+        }
+        return nil
+    }
+}
+
+enum LoginItemManager {
+    static var isEnabled: Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+
+    static func setEnabled(_ enabled: Bool) throws {
+        if enabled {
+            try SMAppService.mainApp.register()
+        } else {
+            try SMAppService.mainApp.unregister()
+        }
     }
 }
 
@@ -68,7 +171,7 @@ final class OverlayController {
     private var petAnchorScreenCenter: CGPoint?
 
     init() {
-        overlayView = OverlayView()
+        overlayView = OverlayView(petAssetConfig: PetSettings.assetConfig())
         window = OverlayPanel(
             contentRect: OverlayController.savedFrame(),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -125,7 +228,11 @@ final class OverlayController {
 
     func reloadNow() {
         updatePanes()
-        overlayView.reloadPetAssets()
+        reloadPetAssets()
+    }
+
+    func reloadPetAssets() {
+        overlayView.reloadPetAssets(config: PetSettings.assetConfig())
     }
 
     private func startTimer() {
@@ -331,11 +438,13 @@ final class OverlayView: NSView {
     private var frameIndex = 0
     private var framesByState: [String: [PetFrame]] = [:]
     private var animationTimer: Timer?
+    private var petAssetConfig: PetAssetConfig
     private let runClassifier = BubbleRunClassifier()
     private var bubbleHorizontalSide: BubbleHorizontalSide = .left
     private var bubbleVerticalSide: BubbleVerticalSide = .above
 
-    override init(frame frameRect: NSRect) {
+    init(frame frameRect: NSRect = .zero, petAssetConfig: PetAssetConfig) {
+        self.petAssetConfig = petAssetConfig
         super.init(frame: frameRect)
         reloadPetAssets()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 0.16, repeats: true) { [weak self] _ in
@@ -403,8 +512,11 @@ final class OverlayView: NSView {
         return CGPoint(x: pet.midX, y: pet.midY)
     }
 
-    func reloadPetAssets() {
-        framesByState = PetSpriteLoader(config: PetAssetConfig()).loadFrames()
+    func reloadPetAssets(config: PetAssetConfig? = nil) {
+        if let config {
+            petAssetConfig = config
+        }
+        framesByState = PetSpriteLoader(config: petAssetConfig).loadFrames()
         DebugLog.write("pet assets loaded states=\(framesByState.keys.sorted().joined(separator: ","))")
         needsDisplay = true
     }
