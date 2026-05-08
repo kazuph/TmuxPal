@@ -187,11 +187,12 @@ final class OverlayController {
     }
 
     private func fitWindow(keepingPetCenter petCenter: CGPoint) {
-        updateBubbleLayout()
+        updateBubbleLayout(forPetCenter: petCenter)
         applyPreferredFrame(keepingPetCenter: petCenter)
         clampToVisibleScreen()
-        updateBubbleLayout()
-        applyPreferredFrame(keepingPetCenter: petScreenCenter())
+        let visiblePetCenter = petScreenCenter()
+        updateBubbleLayout(forPetCenter: visiblePetCenter)
+        applyPreferredFrame(keepingPetCenter: visiblePetCenter)
         clampToVisibleScreen()
     }
 
@@ -249,10 +250,14 @@ final class OverlayController {
     }
 
     private func updateBubbleLayout() {
-        guard let screen = NSScreen.screens.first(where: { $0.visibleFrame.contains(petScreenCenter()) }) ?? NSScreen.main else {
+        updateBubbleLayout(forPetCenter: petScreenCenter())
+    }
+
+    private func updateBubbleLayout(forPetCenter petCenter: CGPoint) {
+        guard let screen = NSScreen.screens.first(where: { $0.visibleFrame.contains(petCenter) }) ?? NSScreen.main else {
             return
         }
-        overlayView.updateBubbleLayout(petCenter: petScreenCenter(), visibleFrame: screen.visibleFrame)
+        overlayView.updateBubbleLayout(petCenter: petCenter, visibleFrame: screen.visibleFrame)
     }
 
     private func petScreenCenter() -> CGPoint {
@@ -583,8 +588,8 @@ final class OverlayView: NSView {
         let pet = petRect()
         let badgeSize: CGFloat = 28
         let rect = NSRect(
-            x: pet.midX + Self.petSize.width * 0.15,
-            y: pet.midY + Self.petSize.height * 0.18,
+            x: pet.midX + Self.petSize.width * 0.04,
+            y: pet.midY + Self.petSize.height * 0.10,
             width: badgeSize,
             height: badgeSize
         )
