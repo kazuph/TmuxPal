@@ -296,6 +296,7 @@ final class OverlayView: NSView {
     static let bubbleWidth: CGFloat = 280
     static let bubbleHeight: CGFloat = 76
     static let padding: CGFloat = 14
+    static let bubblePetGap: CGFloat = -22
 
     var onDrag: ((_ screenPoint: CGPoint, _ grabOffset: CGPoint, _ horizontalDelta: CGFloat) -> Void)?
     var onClickPane: ((TmuxPane) -> Void)?
@@ -347,8 +348,8 @@ final class OverlayView: NSView {
             return NSSize(width: petSize.width + padding * 2 + 18, height: petSize.height + padding * 2 + 12)
         }
         let bubbleStackHeight = Self.bubbleStackHeight(for: count)
-        let height = petSize.height + bubbleStackHeight + padding * 3
-        return NSSize(width: petSize.width + bubbleWidth + padding * 3, height: height)
+        let height = petSize.height + bubbleStackHeight + padding * 2 + bubblePetGap
+        return NSSize(width: bubbleWidth + padding * 2, height: height)
     }
 
     static func bubbleStackHeight(for count: Int) -> CGFloat {
@@ -471,12 +472,14 @@ final class OverlayView: NSView {
         bubbleRects.removeAll()
         let visibleBubbles = bubbles.isEmpty ? [placeholderBubble()] : Array(bubbles.prefix(6))
         let pet = petRect()
-        let startX = bubbleHorizontalSide == .left ? Self.padding : pet.maxX + Self.padding
+        let startX = bubbleHorizontalSide == .left
+            ? pet.maxX - Self.bubbleWidth
+            : pet.minX
         var y: CGFloat
         if bubbleVerticalSide == .above {
-            y = pet.maxY + Self.padding + Self.bubbleStackHeight(for: visibleBubbles.count) - Self.bubbleHeight
+            y = pet.maxY + Self.bubblePetGap + Self.bubbleStackHeight(for: visibleBubbles.count) - Self.bubbleHeight
         } else {
-            y = pet.minY - Self.padding - Self.bubbleHeight
+            y = pet.minY - Self.bubblePetGap - Self.bubbleHeight
         }
 
         for bubble in visibleBubbles {
