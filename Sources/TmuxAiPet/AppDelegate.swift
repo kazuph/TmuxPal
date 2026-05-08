@@ -97,8 +97,8 @@ final class OverlayController {
             }
             TerminalActivator.activatePreferredTerminal()
         }
-        overlayView.onCollapseChanged = { [weak self] in
-            self?.fitWindow()
+        overlayView.onCollapseChanged = { [weak self] petCenter in
+            self?.fitWindow(keepingPetCenter: petCenter)
         }
 
         NotificationCenter.default.addObserver(
@@ -183,8 +183,12 @@ final class OverlayController {
     }
 
     private func fitWindow() {
+        fitWindow(keepingPetCenter: petScreenCenter())
+    }
+
+    private func fitWindow(keepingPetCenter petCenter: CGPoint) {
         updateBubbleLayout()
-        applyPreferredFrame(keepingPetCenter: petScreenCenter())
+        applyPreferredFrame(keepingPetCenter: petCenter)
         clampToVisibleScreen()
         updateBubbleLayout()
         applyPreferredFrame(keepingPetCenter: petScreenCenter())
@@ -300,7 +304,7 @@ final class OverlayView: NSView {
 
     var onDrag: ((_ screenPoint: CGPoint, _ grabOffset: CGPoint, _ horizontalDelta: CGFloat) -> Void)?
     var onClickPane: ((TmuxPane) -> Void)?
-    var onCollapseChanged: (() -> Void)?
+    var onCollapseChanged: ((CGPoint) -> Void)?
 
     private var bubbles: [PaneBubble] = []
     private var bubbleRects: [(NSRect, TmuxPane)] = []
@@ -310,7 +314,8 @@ final class OverlayView: NSView {
     private var dragResetTimer: Timer?
     private var isHovering = false
     private var isDragging = false
-    private var isCollapsed = UserDefaults.standard.bool(forKey: "bubblesCollapsed")
+    private var isCollapsed = ProcessInfo.processInfo.environment["TMUX_AI_PET_COLLAPSED"] == "1"
+        || UserDefaults.standard.bool(forKey: "bubblesCollapsed")
     private var animationState = "idle"
     private var lastHorizontalDragState = "running-right"
     private var frameIndex = 0
@@ -345,7 +350,7 @@ final class OverlayView: NSView {
 
     static func size(forBubbleCount count: Int, collapsed: Bool) -> NSSize {
         if collapsed {
-            return NSSize(width: petSize.width + padding * 2 + 18, height: petSize.height + padding * 2 + 12)
+            return NSSize(width: petSize.width + padding * 2, height: petSize.height + padding * 2)
         }
         let bubbleStackHeight = Self.bubbleStackHeight(for: count)
         let height = petSize.height + bubbleStackHeight + padding * 2 + bubblePetGap
@@ -575,10 +580,11 @@ final class OverlayView: NSView {
 
     private func drawCollapsedBadge() {
         let count = runningTaskCount()
+        let pet = petRect()
         let badgeSize: CGFloat = 28
         let rect = NSRect(
-            x: Self.padding + Self.petSize.width - badgeSize * 0.45,
-            y: Self.padding + Self.petSize.height - badgeSize * 0.55,
+            x: pet.midX + Self.petSize.width * 0.15,
+            y: pet.midY + Self.petSize.height * 0.18,
             width: badgeSize,
             height: badgeSize
         )
@@ -640,11 +646,14 @@ final class OverlayView: NSView {
     }
 
     private func toggleCollapsed() {
+        guard let window else { return }
+        let pet = petRect()
+        let screenPetCenter = CGPoint(x: window.frame.minX + pet.midX, y: window.frame.minY + pet.midY)
         isCollapsed.toggle()
         UserDefaults.standard.set(isCollapsed, forKey: "bubblesCollapsed")
         bubbleRects.removeAll()
         needsDisplay = true
-        onCollapseChanged?()
+        onCollapseChanged?(screenPetCenter)
     }
 
     private func runningTaskCount() -> Int {
