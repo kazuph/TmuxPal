@@ -96,6 +96,26 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertEqual(BubbleRunClassifier().classify(bubble), .complete)
     }
 
+    func testBadgeCountsCompletedAwaitingBubbles() {
+        let completedPrompt = PaneBubble(
+            pane: makePane(command: "node", transcriptTail: "\n› Ready for next instruction"),
+            summary: "sample-agent\nWaiting for instructions"
+        )
+        let stoppedAgent = PaneBubble(
+            pane: makePane(command: "beam.smp", transcriptTail: "No active agents"),
+            summary: "elixir\nNo active agents"
+        )
+        let running = PaneBubble(
+            pane: makePane(command: "node", transcriptTail: "• Working (43s · esc to interrupt)"),
+            summary: "sample-agent\nRun tests"
+        )
+
+        XCTAssertEqual(
+            BubbleBadgeCounter().completedAwaitingCount(in: [completedPrompt, stoppedAgent, running]),
+            2
+        )
+    }
+
     func testParsesTmuxClients() {
         let output = [
             "/dev/ttys000|#|0|#|1|#|1",

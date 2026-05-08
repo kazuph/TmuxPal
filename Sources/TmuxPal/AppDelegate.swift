@@ -773,6 +773,7 @@ final class OverlayView: NSView {
     private var palAssetConfig: PalAssetConfig
     private var palScale = PalSettings.displaySize.scale
     private let runClassifier = BubbleRunClassifier()
+    private let badgeCounter = BubbleBadgeCounter()
     private var bubbleHorizontalSide: BubbleHorizontalSide = .left
     private var bubbleVerticalSide: BubbleVerticalSide = .above
 
@@ -1052,7 +1053,7 @@ final class OverlayView: NSView {
     }
 
     private func drawCollapsedBadge() {
-        let count = runningTaskCount()
+        let count = completedAwaitingCount()
         let pal = palRect()
         let badgeSize: CGFloat = 28
         let rect = NSRect(
@@ -1131,8 +1132,8 @@ final class OverlayView: NSView {
         onCollapseChanged?()
     }
 
-    private func runningTaskCount() -> Int {
-        bubbles.filter { runState(for: $0) == .running }.count
+    private func completedAwaitingCount() -> Int {
+        badgeCounter.completedAwaitingCount(in: bubbles)
     }
 
     private func runState(for bubble: PaneBubble) -> BubbleRunState {
