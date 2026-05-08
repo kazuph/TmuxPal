@@ -570,7 +570,7 @@ final class OverlayController {
     private func startTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.updatePanes()
             }
         }
@@ -781,7 +781,7 @@ final class OverlayView: NSView {
         super.init(frame: frameRect)
         reloadPalAssets()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 0.16, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.advanceAnimation()
             }
         }
