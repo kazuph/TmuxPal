@@ -55,10 +55,19 @@ The app does not require `TMUX_PANE`; it polls the whole tmux server.
 Download either `TmuxPal-<version>.dmg` or `TmuxPal-<version>.zip` from a
 GitHub Release, then move `TmuxPal.app` to `/Applications` and open it once.
 
-The release artifacts are unsigned unless Developer ID signing credentials are added
-to CI, so macOS Gatekeeper may require right-clicking the app and choosing
-Open. For fully public distribution, add Developer ID signing and notarization
-to the release workflow.
+Release artifacts are Developer ID signed and notarized when these GitHub
+Actions secrets are configured:
+
+- `CODESIGN_IDENTITY`
+- `APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`
+- `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`
+- `APPLE_ID`
+- `APPLE_TEAM_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `KEYCHAIN_PASSWORD` (optional)
+
+Without those secrets, local and CI builds fall back to ad-hoc signing and
+macOS Gatekeeper will block the downloaded app.
 
 Create a release by pushing a version tag:
 

@@ -8,6 +8,7 @@ dist_dir="$repo_dir/dist"
 app_path="$dist_dir/TmuxPal.app"
 release_dir="$dist_dir/release"
 dmg_root="$release_dir/dmg-root"
+notary_zip_path="$release_dir/TmuxPal-${version}-notary.zip"
 
 rm -rf "$release_dir"
 mkdir -p "$release_dir"
@@ -18,6 +19,18 @@ TMUXPAL_VERSION="$version" "$repo_dir/Scripts/build_app.sh" >/dev/null
 zip_path="$release_dir/TmuxPal-${version}.zip"
 dmg_path="$release_dir/TmuxPal-${version}.dmg"
 checksum_path="$release_dir/checksums.txt"
+
+if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${CODESIGN_IDENTITY:-}" ]]; then
+  ditto -c -k --keepParent "$app_path" "$notary_zip_path"
+  xcrun notarytool submit "$notary_zip_path" \
+    --apple-id "$APPLE_ID" \
+    --team-id "$APPLE_TEAM_ID" \
+    --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+    --wait
+  xcrun stapler staple "$app_path"
+  spctl -a -vvv "$app_path"
+  rm -f "$notary_zip_path"
+fi
 
 ditto -c -k --keepParent "$app_path" "$zip_path"
 mkdir -p "$dmg_root"
@@ -30,6 +43,16 @@ hdiutil create \
   -format UDZO \
   "$dmg_path" >/dev/null
 rm -rf "$dmg_root"
+
+if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${CODESIGN_IDENTITY:-}" ]]; then
+  xcrun notarytool submit "$dmg_path" \
+    --apple-id "$APPLE_ID" \
+    --team-id "$APPLE_TEAM_ID" \
+    --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+    --wait
+  xcrun stapler staple "$dmg_path"
+  spctl -a -vvv -t open "$dmg_path"
+fi
 
 (
   cd "$release_dir"

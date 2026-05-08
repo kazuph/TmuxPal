@@ -7,6 +7,7 @@ app_dir="$repo_dir/dist/TmuxPal.app"
 contents_dir="$app_dir/Contents"
 macos_dir="$contents_dir/MacOS"
 resources_dir="$contents_dir/Resources"
+entitlements_path="$repo_dir/Packaging/TmuxPal.entitlements"
 
 cd "$repo_dir"
 SWIFTPM_DISABLE_SANDBOX=1 swift build -c release --disable-sandbox
@@ -51,5 +52,22 @@ cat > "$contents_dir/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - "$app_dir" >/dev/null 2>&1 || true
+if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+  codesign \
+    --force \
+    --timestamp \
+    --options runtime \
+    --entitlements "$entitlements_path" \
+    --sign "$CODESIGN_IDENTITY" \
+    "$macos_dir/TmuxPal"
+  codesign \
+    --force \
+    --timestamp \
+    --options runtime \
+    --entitlements "$entitlements_path" \
+    --sign "$CODESIGN_IDENTITY" \
+    "$app_dir"
+else
+  codesign --force --sign - "$app_dir" >/dev/null 2>&1 || true
+fi
 echo "$app_dir"

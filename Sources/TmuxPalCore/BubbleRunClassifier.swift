@@ -13,11 +13,6 @@ public struct BubbleRunClassifier: Sendable {
             return .complete
         }
 
-        let command = bubble.pane.currentCommand.lowercased()
-        if command == "zsh" || command == "bash" {
-            return .complete
-        }
-
         let fullText = [
             bubble.summary,
             bubble.pane.transcriptExcerpt,
@@ -33,21 +28,26 @@ public struct BubbleRunClassifier: Sendable {
                 "• working",
                 "\nworking (",
                 " working (",
-                "running command"
+                "running command",
+                "running shell command",
+                "\n● ",
+                "\n⠋ ",
+                "\n✻ ",
+                "\n✽ ",
+                "\n◇ ",
+                "thinking",
+                "analyzing",
+                "processing",
+                "running..."
             ]
         )
         let lastStopped = lastMarkerIndex(
             in: fullText,
             markers: [
                 "worked for",
+                "task complete",
                 "no active agents",
                 "nothing to do",
-                "completed",
-                "done",
-                "pass",
-                "passed",
-                "success",
-                "succeeded",
                 "終了"
             ]
         )
@@ -55,12 +55,14 @@ public struct BubbleRunClassifier: Sendable {
             return .running
         }
 
-        let lastPrompt = lastMarkerIndex(
-            in: fullText,
-            markers: ["\n› ", "\n❯", "╰─ ❯"]
-        )
-        if let lastPrompt, lastPrompt > (lastRunning ?? -1) {
-            return .complete
+        if bubble.pane.tool == .codex {
+            let lastPrompt = lastMarkerIndex(
+                in: fullText,
+                markers: ["\n› ", "\n❯", "╰─ ❯"]
+            )
+            if let lastPrompt, lastPrompt > (lastRunning ?? -1) {
+                return .complete
+            }
         }
 
         return .complete

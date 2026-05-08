@@ -19,8 +19,44 @@ jobs:
       - name: Test
         run: SWIFTPM_DISABLE_SANDBOX=1 swift test --disable-sandbox
 
+      - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${APPLE_DEVELOPER_ID_CERTIFICATE_BASE64:-}" ]]; then
+            echo "No Developer ID certificate secret configured; package will use ad-hoc signing."
+            exit 0
+          fi
+          keychain_password="${KEYCHAIN_PASSWORD:-temporary-ci-keychain-password}"
+          security create-keychain -p "$keychain_password" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$keychain_password" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          echo "$APPLE_DEVELOPER_ID_CERTIFICATE_BASE64" | base64 --decode > developer-id.p12
+          security import developer-id.p12 \
+            -k build.keychain \
+            -P "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD:-}" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" build.keychain
+          security find-identity -v -p codesigning build.keychain
+
       - name: Package
-        run: ./Scripts/package_release.sh "${GITHUB_REF_NAME:-manual}"
+        run: |
+          set -euo pipefail
+          if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
+            CODESIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ { print $2; exit }')"
+            export CODESIGN_IDENTITY
+          fi
+          ./Scripts/package_release.sh "${GITHUB_REF_NAME:-manual}"
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

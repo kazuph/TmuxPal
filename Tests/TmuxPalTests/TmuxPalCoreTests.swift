@@ -96,6 +96,94 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertEqual(BubbleRunClassifier().classify(bubble), .complete)
     }
 
+    func testClassifiesCopilotActiveTaskAsRunningDespitePromptLine() {
+        let transcript = """
+        ● Inspect current implementation (shell)
+          │ rg -n "sample" Sources Tests
+          └ 12 lines...
+
+        ~/workspace/sample [main]
+        ───────────────────────────────────────
+        ❯
+        """
+        let bubble = PaneBubble(
+            pane: makePane(command: "copilot", transcriptTail: transcript, tool: .copilot),
+            summary: "sample\nInspect current implementation"
+        )
+
+        XCTAssertEqual(BubbleRunClassifier().classify(bubble), .running)
+    }
+
+    func testClassifiesCopilotActiveTaskAsRunningDespiteCompletedCommandOutput() {
+        let transcript = """
+        ● Check workflow status (shell)
+          │ gh run list --json status,conclusion --limit 2
+          └ [{"status":"completed","conclusion":"success"}]
+
+        ● Continue follow-up work (shell)
+          │ ./scripts/verify-release
+          └ running...
+
+        ~/workspace/sample [main]
+        ───────────────────────────────────────
+        ❯
+        """
+        let bubble = PaneBubble(
+            pane: makePane(command: "copilot", transcriptTail: transcript, tool: .copilot),
+            summary: "sample\nWorkflow status included completed rows"
+        )
+
+        XCTAssertEqual(BubbleRunClassifier().classify(bubble), .running)
+    }
+
+    func testClassifiesShellBackedDetectedAgentAsRunning() {
+        let transcript = """
+        ● Execute generated command (shell)
+          │ npm test
+          └ running...
+        """
+        let bubble = PaneBubble(
+            pane: makePane(command: "zsh", transcriptTail: transcript, tool: .copilot),
+            summary: "sample\nExecute generated command"
+        )
+
+        XCTAssertEqual(BubbleRunClassifier().classify(bubble), .running)
+    }
+
+    func testClassifiesCopilotTaskCompleteAsComplete() {
+        let transcript = """
+        ● Verify result (shell)
+          └ 4 lines...
+
+        ● Task complete
+          └ The requested update is done.
+
+        ~/workspace/sample [main]
+        ───────────────────────────────────────
+        ❯
+        """
+        let bubble = PaneBubble(
+            pane: makePane(command: "copilot", transcriptTail: transcript, tool: .copilot),
+            summary: "sample\nTask complete"
+        )
+
+        XCTAssertEqual(BubbleRunClassifier().classify(bubble), .complete)
+    }
+
+    func testCollectRefreshesTranscriptWhenCacheTTLExpires() throws {
+        let row = tmuxRow(command: "copilot", title: "Sample task")
+        let runner = RecordingRunner(outputs: [
+            "list-panes": row,
+            "capture-pane": "● Execute generated command (shell)\n  └ running...\n"
+        ])
+        let collector = TmuxCollector(tmuxPath: "tmux", tmuxSocketPath: "/tmp/test", runner: runner, transcriptCacheTTL: 0)
+
+        _ = try collector.collect()
+        _ = try collector.collect()
+
+        XCTAssertEqual(runner.commands.filter { $0.contains("capture-pane") }.count, 2)
+    }
+
     func testBadgeCountsCompletedAwaitingBubbles() {
         let completedPrompt = PaneBubble(
             pane: makePane(command: "node", transcriptTail: "\n› Ready for next instruction"),
@@ -193,7 +281,8 @@ final class TmuxPalCoreTests: XCTestCase {
         paneIndex: String = "1",
         paneId: String = "%1",
         command: String,
-        transcriptTail: String
+        transcriptTail: String,
+        tool: AiTool = .codex
     ) -> TmuxPane {
         TmuxPane(
             sessionName: sessionName,
@@ -211,7 +300,7 @@ final class TmuxPalCoreTests: XCTestCase {
             commandLine: command,
             transcriptExcerpt: transcriptTail,
             transcriptTail: transcriptTail,
-            tool: .codex,
+            tool: tool,
             status: .selected
         )
     }

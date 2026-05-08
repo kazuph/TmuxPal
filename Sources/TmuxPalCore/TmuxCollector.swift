@@ -68,18 +68,20 @@ public struct TmuxCollector: Sendable {
     private let tmuxSocketPath: String?
     private let runner: CommandRunning
     private let detector: AiPaneDetector
-    private let transcriptCache = LockedTranscriptCache()
+    private let transcriptCache: LockedTranscriptCache
 
     public init(
         tmuxPath: String = "/opt/homebrew/bin/tmux",
         tmuxSocketPath: String? = nil,
         runner: CommandRunning = ProcessCommandRunner(),
-        detector: AiPaneDetector = AiPaneDetector()
+        detector: AiPaneDetector = AiPaneDetector(),
+        transcriptCacheTTL: TimeInterval = 1.5
     ) {
         self.tmuxPath = tmuxPath
         self.tmuxSocketPath = tmuxSocketPath ?? Self.defaultSocketPath()
         self.runner = runner
         self.detector = detector
+        self.transcriptCache = LockedTranscriptCache(transcriptTTL: transcriptCacheTTL)
     }
 
     public func collect() throws -> [TmuxPane] {
@@ -336,8 +338,12 @@ private final class LockedTranscriptCache: @unchecked Sendable {
     private let lock = NSLock()
     private var transcripts: [String: TranscriptEntry] = [:]
     private var processCommandLines: [String: StringEntry] = [:]
-    private let transcriptTTL: TimeInterval = 6
+    private let transcriptTTL: TimeInterval
     private let processCommandLineTTL: TimeInterval = 30
+
+    init(transcriptTTL: TimeInterval) {
+        self.transcriptTTL = transcriptTTL
+    }
 
     func transcript(for paneId: String, signature: String) -> (excerpt: String, tail: String)? {
         lock.lock()
