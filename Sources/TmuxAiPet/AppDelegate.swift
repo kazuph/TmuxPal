@@ -296,7 +296,7 @@ final class OverlayView: NSView {
     static let bubbleWidth: CGFloat = 280
     static let bubbleHeight: CGFloat = 76
     static let padding: CGFloat = 14
-    static let bubblePetGap: CGFloat = -10
+    static let bubblePetGap: CGFloat = 18
 
     var onDrag: ((_ screenPoint: CGPoint, _ grabOffset: CGPoint, _ horizontalDelta: CGFloat) -> Void)?
     var onClickPane: ((TmuxPane) -> Void)?
