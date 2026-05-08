@@ -11,6 +11,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appServerManager: AppServerManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard SingleInstanceGuard.shouldContinueLaunching() else {
+            DebugLog.write("app exiting because another instance is already running")
+            NSApp.terminate(nil)
+            return
+        }
         NSApp.setActivationPolicy(.accessory)
         try? AppSupport.ensureSupportDirectory()
         DebugLog.write("app launched")
@@ -43,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "表示/非表示", action: #selector(toggleOverlay), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "再読み込み", action: #selector(reloadOverlay), keyEquivalent: "r"))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "ペットを選択...", action: #selector(selectPet), keyEquivalent: ""))
+        menu.addItem(petSelectionMenuItem())
         menu.addItem(NSMenuItem(title: "デフォルトのどこちゃんに戻す", action: #selector(useDefaultPet), keyEquivalent: ""))
         menu.addItem(.separator())
         let loginItem = NSMenuItem(title: "ログイン時に起動", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
@@ -54,6 +59,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.menu = menu
     }
 
+    private func petSelectionMenuItem() -> NSMenuItem {
+        let rootItem = NSMenuItem(title: "ペットを選択", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        let petDirectories = PetSettings.discoveredPetDirectories()
+
+        if petDirectories.isEmpty {
+            submenu.addItem(NSMenuItem(title: "ファイルから選択...", action: #selector(selectPetFromFile), keyEquivalent: ""))
+        } else {
+            for directory in petDirectories {
+                let item = NSMenuItem(
+                    title: PetSettings.displayName(forPetDirectory: directory),
+                    action: #selector(selectDiscoveredPet(_:)),
+                    keyEquivalent: ""
+                )
+                item.representedObject = directory
+                item.state = PetSettings.selectedPetDirectory?.standardizedFileURL == directory.standardizedFileURL ? .on : .off
+                submenu.addItem(item)
+            }
+        }
+
+        rootItem.submenu = submenu
+        return rootItem
+    }
+
     @objc private func toggleOverlay() {
         overlayController?.toggle()
     }
@@ -62,10 +91,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayController?.reloadNow()
     }
 
-    @objc private func selectPet() {
+    @objc private func selectDiscoveredPet(_ sender: NSMenuItem) {
+        guard let directory = sender.representedObject as? URL else {
+            return
+        }
+        PetSettings.selectedPetDirectory = directory
+        overlayController?.reloadPetAssets()
+        rebuildStatusMenu()
+    }
+
+    @objc private func selectPetFromFile() {
         let panel = NSOpenPanel()
         panel.title = "ペットを選択"
         panel.message = "pet.json を含むフォルダ、または pet.json を選択してください。"
+        panel.directoryURL = PetSettings.defaultPetPickerDirectory()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -81,11 +120,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         PetSettings.selectedPetDirectory = directory
         overlayController?.reloadPetAssets()
+        rebuildStatusMenu()
     }
 
     @objc private func useDefaultPet() {
         PetSettings.selectedPetDirectory = nil
         overlayController?.reloadPetAssets()
+        rebuildStatusMenu()
     }
 
     @objc private func toggleLaunchAtLogin() {
@@ -102,8 +143,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+enum SingleInstanceGuard {
+    static func shouldContinueLaunching() -> Bool {
+        let currentPid = ProcessInfo.processInfo.processIdentifier
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? AppSupport.bundleIdentifier
+        return !NSWorkspace.shared.runningApplications.contains { app in
+            app.processIdentifier != currentPid
+                && app.bundleIdentifier == bundleIdentifier
+                && app.isTerminated == false
+        }
+    }
+}
+
 enum PetSettings {
     private static let selectedPetDirectoryKey = "selectedPetDirectory"
+    private static let userPetRoot = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent(".codex/pets")
 
     static var selectedPetDirectory: URL? {
         get {
@@ -130,6 +186,39 @@ enum PetSettings {
             return PetAssetConfig(metadataURL: bundled.appendingPathComponent("pet.json"))
         }
         return PetAssetConfig()
+    }
+
+    static func discoveredPetDirectories() -> [URL] {
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: userPetRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return children
+            .filter { url in
+                (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                    && FileManager.default.fileExists(atPath: url.appendingPathComponent("pet.json").path)
+            }
+            .sorted { displayName(forPetDirectory: $0).localizedCaseInsensitiveCompare(displayName(forPetDirectory: $1)) == .orderedAscending }
+    }
+
+    static func defaultPetPickerDirectory() -> URL {
+        if FileManager.default.fileExists(atPath: userPetRoot.path) {
+            return userPetRoot
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    static func displayName(forPetDirectory directory: URL) -> String {
+        let metadataURL = directory.appendingPathComponent("pet.json")
+        if let data = try? Data(contentsOf: metadataURL),
+           let request = try? JSONDecoder().decode(PetRequest.self, from: data) {
+            return request.displayName
+        }
+        return directory.lastPathComponent
     }
 
     private static func bundledDokochanDirectory() -> URL? {

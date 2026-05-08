@@ -99,9 +99,10 @@ Default assets:
 - bundled `Pets/dokochan/spritesheet.webp`
 - bundled `Pets/dokochan/pet.json`
 
-The app can also load a custom pet directory from the menu bar. The selected
-directory must contain `pet.json`; relative `spritesheetPath` entries are
-resolved from that directory.
+The menu bar lists pet directories found under `$HOME/.codex/pets` when they
+contain `pet.json`. If no pets are found there, the selector falls back to a
+file picker. Relative `spritesheetPath` entries are resolved from the selected
+pet directory.
 
 ## License
 
