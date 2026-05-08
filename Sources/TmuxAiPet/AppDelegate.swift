@@ -65,6 +65,7 @@ final class OverlayController {
     private var timer: Timer?
     private var lastLoggedBubbleCount: Int?
     private var isUpdating = false
+    private var petAnchorScreenCenter: CGPoint?
 
     init() {
         overlayView = OverlayView()
@@ -97,8 +98,8 @@ final class OverlayController {
             }
             TerminalActivator.activatePreferredTerminal()
         }
-        overlayView.onCollapseChanged = { [weak self] petCenter in
-            self?.fitWindow(keepingPetCenter: petCenter)
+        overlayView.onCollapseChanged = { [weak self] in
+            self?.fitWindow()
         }
 
         NotificationCenter.default.addObserver(
@@ -111,6 +112,7 @@ final class OverlayController {
 
     func show() {
         clampToVisibleScreen()
+        petAnchorScreenCenter = petScreenCenter()
         window.orderFrontRegardless()
         window.displayIfNeeded()
         DebugLog.write("overlay shown frame=\(NSStringFromRect(window.frame))")
@@ -183,17 +185,17 @@ final class OverlayController {
     }
 
     private func fitWindow() {
-        fitWindow(keepingPetCenter: petScreenCenter())
+        fitWindow(keepingPetCenter: petAnchorScreenCenter ?? petScreenCenter())
     }
 
     private func fitWindow(keepingPetCenter petCenter: CGPoint) {
         updateBubbleLayout(forPetCenter: petCenter)
         applyPreferredFrame(keepingPetCenter: petCenter)
-        clampToVisibleScreen()
+        petAnchorScreenCenter = clampToVisibleScreen()
         let visiblePetCenter = petScreenCenter()
         updateBubbleLayout(forPetCenter: visiblePetCenter)
         applyPreferredFrame(keepingPetCenter: visiblePetCenter)
-        clampToVisibleScreen()
+        petAnchorScreenCenter = clampToVisibleScreen()
     }
 
     private func moveWindow(toScreenPoint screenPoint: CGPoint, grabOffset: CGPoint, horizontalDelta: CGFloat) {
@@ -203,7 +205,7 @@ final class OverlayController {
         window.setFrame(frame, display: true)
         updateBubbleLayout()
         applyPreferredFrame(keepingPetCenter: petScreenCenter())
-        clampToVisibleScreen()
+        petAnchorScreenCenter = clampToVisibleScreen()
         overlayView.setDragging(horizontalDelta: horizontalDelta)
         saveFrame()
     }
@@ -213,13 +215,14 @@ final class OverlayController {
     }
 
     @objc private func screenParametersDidChange() {
-        clampToVisibleScreen()
+        petAnchorScreenCenter = clampToVisibleScreen()
         saveFrame()
     }
 
-    private func clampToVisibleScreen() {
+    @discardableResult
+    private func clampToVisibleScreen() -> CGPoint {
         guard let screen = NSScreen.screens.first(where: { $0.visibleFrame.contains(petScreenCenter()) }) ?? NSScreen.main else {
-            return
+            return petScreenCenter()
         }
         var frame = window.frame
         let visible = screen.visibleFrame
@@ -238,14 +241,16 @@ final class OverlayController {
             frame.origin.y -= petScreen.maxY - visible.maxY
         }
         window.setFrame(frame, display: true)
+        return petScreenCenter()
     }
 
     private func applyPreferredFrame(keepingPetCenter petCenter: CGPoint) {
         let desired = overlayView.preferredSize()
+        let petCenterInDesiredBounds = overlayView.petCenterInBounds(for: desired)
         var frame = window.frame
         frame.size = desired
-        frame.origin.x = petCenter.x - overlayView.petCenterInBounds().x
-        frame.origin.y = petCenter.y - overlayView.petCenterInBounds().y
+        frame.origin.x = petCenter.x - petCenterInDesiredBounds.x
+        frame.origin.y = petCenter.y - petCenterInDesiredBounds.y
         window.setFrame(frame, display: true)
     }
 
@@ -309,7 +314,7 @@ final class OverlayView: NSView {
 
     var onDrag: ((_ screenPoint: CGPoint, _ grabOffset: CGPoint, _ horizontalDelta: CGFloat) -> Void)?
     var onClickPane: ((TmuxPane) -> Void)?
-    var onCollapseChanged: ((CGPoint) -> Void)?
+    var onCollapseChanged: (() -> Void)?
 
     private var bubbles: [PaneBubble] = []
     private var bubbleRects: [(NSRect, TmuxPane)] = []
@@ -390,6 +395,11 @@ final class OverlayView: NSView {
 
     func petCenterInBounds() -> CGPoint {
         let pet = petRect()
+        return CGPoint(x: pet.midX, y: pet.midY)
+    }
+
+    func petCenterInBounds(for size: NSSize) -> CGPoint {
+        let pet = petRect(in: NSRect(origin: .zero, size: size))
         return CGPoint(x: pet.midX, y: pet.midY)
     }
 
@@ -638,6 +648,10 @@ final class OverlayView: NSView {
     }
 
     private func petRect() -> NSRect {
+        petRect(in: bounds)
+    }
+
+    private func petRect(in bounds: NSRect) -> NSRect {
         if isCollapsed {
             return NSRect(x: Self.padding, y: Self.padding, width: Self.petSize.width, height: Self.petSize.height)
         }
@@ -651,14 +665,11 @@ final class OverlayView: NSView {
     }
 
     private func toggleCollapsed() {
-        guard let window else { return }
-        let pet = petRect()
-        let screenPetCenter = CGPoint(x: window.frame.minX + pet.midX, y: window.frame.minY + pet.midY)
         isCollapsed.toggle()
         UserDefaults.standard.set(isCollapsed, forKey: "bubblesCollapsed")
         bubbleRects.removeAll()
         needsDisplay = true
-        onCollapseChanged?(screenPetCenter)
+        onCollapseChanged?()
     }
 
     private func runningTaskCount() -> Int {
