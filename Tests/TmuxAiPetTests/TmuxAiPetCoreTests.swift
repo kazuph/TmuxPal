@@ -96,6 +96,42 @@ final class TmuxAiPetCoreTests: XCTestCase {
         XCTAssertEqual(BubbleRunClassifier().classify(bubble), .complete)
     }
 
+    func testParsesTmuxClients() {
+        let output = [
+            "/dev/ttys000|#|0|#|1|#|1",
+            "/dev/ttys003|#|symphony4040|#|1|#|1"
+        ].joined(separator: "\n")
+
+        let clients = TmuxCollector(tmuxSocketPath: "/tmp/test").parseListClients(output)
+
+        XCTAssertEqual(clients, [
+            TmuxClient(name: "/dev/ttys000", sessionName: "0", windowIndex: "1", paneIndex: "1"),
+            TmuxClient(name: "/dev/ttys003", sessionName: "symphony4040", windowIndex: "1", paneIndex: "1")
+        ])
+    }
+
+    func testFocusSwitchesClientForDifferentSessionPane() throws {
+        let runner = RecordingRunner(outputs: [
+            "list-clients": "/dev/ttys000|#|0|#|1|#|1\n"
+        ])
+        let collector = TmuxCollector(tmuxPath: "tmux", tmuxSocketPath: "/tmp/test", runner: runner)
+        let pane = makePane(
+            sessionName: "symphony4040",
+            windowIndex: "1",
+            paneIndex: "1",
+            paneId: "%93",
+            command: "beam.smp",
+            transcriptTail: ""
+        )
+
+        try collector.focus(pane)
+
+        XCTAssertTrue(runner.commands.contains { $0.suffix(3) == ["list-clients", "-F", "#{client_name}|#|#{session_name}|#|#{window_index}|#|#{pane_index}"] })
+        XCTAssertTrue(runner.commands.contains { $0.suffix(5) == ["switch-client", "-c", "/dev/ttys000", "-t", "symphony4040:1.1"] })
+        XCTAssertTrue(runner.commands.contains { $0.suffix(3) == ["select-pane", "-t", "%93"] })
+        XCTAssertFalse(runner.commands.contains { $0.contains("select-window") })
+    }
+
     private func fixturePath(_ name: String) -> String {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -106,14 +142,21 @@ final class TmuxAiPetCoreTests: XCTestCase {
             .path
     }
 
-    private func makePane(command: String, transcriptTail: String) -> TmuxPane {
+    private func makePane(
+        sessionName: String = "0",
+        windowIndex: String = "1",
+        paneIndex: String = "1",
+        paneId: String = "%1",
+        command: String,
+        transcriptTail: String
+    ) -> TmuxPane {
         TmuxPane(
-            sessionName: "0",
-            windowIndex: "1",
+            sessionName: sessionName,
+            windowIndex: windowIndex,
             windowId: "@1",
             windowName: "repo",
-            paneIndex: "1",
-            paneId: "%1",
+            paneIndex: paneIndex,
+            paneId: paneId,
             panePid: "123",
             paneTty: "/dev/ttys001",
             currentCommand: command,
@@ -126,5 +169,31 @@ final class TmuxAiPetCoreTests: XCTestCase {
             tool: .codex,
             status: .selected
         )
+    }
+}
+
+final class RecordingRunner: CommandRunning, @unchecked Sendable {
+    private let outputs: [String: String]
+    private let lock = NSLock()
+    private var recordedCommands: [[String]] = []
+
+    var commands: [[String]] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedCommands
+    }
+
+    init(outputs: [String: String]) {
+        self.outputs = outputs
+    }
+
+    func run(_ executable: String, _ arguments: [String]) throws -> String {
+        lock.lock()
+        recordedCommands.append(arguments)
+        lock.unlock()
+        for (needle, output) in outputs where arguments.contains(needle) {
+            return output
+        }
+        return ""
     }
 }

@@ -47,6 +47,20 @@ public enum TmuxCollectorError: Error, LocalizedError {
     }
 }
 
+public struct TmuxClient: Equatable, Sendable {
+    public let name: String
+    public let sessionName: String
+    public let windowIndex: String
+    public let paneIndex: String
+
+    public init(name: String, sessionName: String, windowIndex: String, paneIndex: String) {
+        self.name = name
+        self.sessionName = sessionName
+        self.windowIndex = windowIndex
+        self.paneIndex = paneIndex
+    }
+}
+
 public struct TmuxCollector: Sendable {
     public static let fieldSeparator = "|#|"
 
@@ -199,8 +213,45 @@ public struct TmuxCollector: Sendable {
     }
 
     public func focus(_ pane: TmuxPane) throws {
-        _ = try runTmux(["select-window", "-t", "\(pane.sessionName):\(pane.windowIndex)"])
+        let target = "\(pane.sessionName):\(pane.windowIndex).\(pane.paneIndex)"
+        if let client = try preferredClient(for: pane) {
+            _ = try runTmux(["switch-client", "-c", client.name, "-t", target])
+        } else {
+            _ = try runTmux(["select-window", "-t", "\(pane.sessionName):\(pane.windowIndex)"])
+        }
         _ = try runTmux(["select-pane", "-t", pane.paneId])
+    }
+
+    public func parseListClients(_ output: String) -> [TmuxClient] {
+        output
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .compactMap { line in
+                let parts = String(line).components(separatedBy: Self.fieldSeparator)
+                guard parts.count >= 4, !parts[0].isEmpty else {
+                    return nil
+                }
+                return TmuxClient(name: parts[0], sessionName: parts[1], windowIndex: parts[2], paneIndex: parts[3])
+            }
+    }
+
+    private func preferredClient(for pane: TmuxPane) throws -> TmuxClient? {
+        let format = [
+            "#{client_name}",
+            "#{session_name}",
+            "#{window_index}",
+            "#{pane_index}"
+        ].joined(separator: Self.fieldSeparator)
+        let clients = parseListClients(try runTmux(["list-clients", "-F", format]))
+        guard !clients.isEmpty else {
+            return nil
+        }
+        if let sameSession = clients.first(where: { $0.sessionName == pane.sessionName }) {
+            return sameSession
+        }
+        if let mainSession = clients.first(where: { $0.sessionName == "0" }) {
+            return mainSession
+        }
+        return clients.first
     }
 
     private func runTmux(_ arguments: [String]) throws -> String {
