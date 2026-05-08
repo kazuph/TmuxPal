@@ -320,9 +320,9 @@ enum PalDisplaySize: String, CaseIterable {
 
     var scale: CGFloat {
         switch self {
-        case .small: return 1.0
-        case .medium: return 2.0
-        case .large: return 3.0
+        case .small: return 1.2
+        case .medium: return 2.4
+        case .large: return 3.6
         }
     }
 }
