@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.kazuph.tmux-ai-pet</string>
+  <string>dev.tmux-ai-pet</string>
   <key>ProgramArguments</key>
   <array>
     <string>__APP__/Contents/MacOS/TmuxAiPet</string>

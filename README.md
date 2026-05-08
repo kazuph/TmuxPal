@@ -72,7 +72,7 @@ It does not overwrite other hook slots.
 
 Default assets:
 
-- `/Users/kazuph/.codex/pets/dokochan/spritesheet.webp`
-- `/Users/kazuph/.codex/pets/dokochan/pet.json`
+- `$HOME/.codex/pets/dokochan/spritesheet.webp`
+- `$HOME/.codex/pets/dokochan/pet.json`
 
 Initial version is intentionally Dokochan-only.

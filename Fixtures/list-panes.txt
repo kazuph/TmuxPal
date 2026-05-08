@@ -1,5 +1,5 @@
-0|#|1|#|@1|#|hermes-agent-%145-確認完了|#|1|#|%145|#|12345|#|/dev/ttys001|#|node|#|/Users/kazuph/src/github.com/nousresearch/hermes-agent|#|0|#|node /Users/kazuph/.local/share/mise/installs/node/22.21.1/bin/codex --sandbox workspace-write resume --last
-0|#|2|#|@2|#|homura-%130-修正完了|#|1|#|%130|#|12346|#|/dev/ttys002|#|copilot|#|/Users/kazuph/src/github.com/kazuph/homura|#|1|#|Mount R2 In Ruby Worker
-0|#|3|#|@3|#|plain-shell|#|1|#|%131|#|12347|#|/dev/ttys003|#|zsh|#|/Users/kazuph|#|0|#|zsh
-0|#|4|#|@4|#|claude-work|#|1|#|%132|#|12348|#|/dev/ttys004|#|claude|#|/Users/kazuph/src/github.com/kazuph/reviw|#|0|#|Claude Code
-0|#|5|#|@5|#|open-work|#|1|#|%133|#|12349|#|/dev/ttys005|#|opencode|#|/Users/kazuph/src/github.com/kazuph/oh-my-openagent|#|0|#|opencode
+0|#|1|#|@1|#|sample-agent-%145-done|#|1|#|%145|#|12345|#|/dev/ttys001|#|node|#|/workspace/sample-agent|#|0|#|node /usr/local/bin/codex --sandbox workspace-write resume --last
+0|#|2|#|@2|#|sample-repo-%130-done|#|1|#|%130|#|12346|#|/dev/ttys002|#|copilot|#|/workspace/sample-repo|#|1|#|Sample build task
+0|#|3|#|@3|#|plain-shell|#|1|#|%131|#|12347|#|/dev/ttys003|#|zsh|#|/workspace|#|0|#|zsh
+0|#|4|#|@4|#|sample-claude-work|#|1|#|%132|#|12348|#|/dev/ttys004|#|claude|#|/workspace/sample-claude-repo|#|0|#|Claude Code
+0|#|5|#|@5|#|sample-open-work|#|1|#|%133|#|12349|#|/dev/ttys005|#|opencode|#|/workspace/sample-open-repo|#|0|#|opencode

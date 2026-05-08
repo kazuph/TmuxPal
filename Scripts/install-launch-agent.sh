@@ -4,7 +4,8 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 app_path="$repo_dir/dist/TmuxAiPet.app"
 launcher_path="$repo_dir/Scripts/run-launch-agent.sh"
-plist_path="$HOME/Library/LaunchAgents/com.kazuph.tmux-ai-pet.plist"
+label="dev.tmux-ai-pet"
+plist_path="$HOME/Library/LaunchAgents/${label}.plist"
 
 if [[ ! -d "$app_path" ]]; then
   "$repo_dir/Scripts/build_app.sh" >/dev/null
@@ -19,7 +20,7 @@ cat > "$plist_path" <<PLIST
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.kazuph.tmux-ai-pet</string>
+  <string>${label}</string>
   <key>ProgramArguments</key>
   <array>
     <string>${launcher_path}</string>
@@ -38,6 +39,6 @@ PLIST
 
 launchctl bootout "gui/$(id -u)" "$plist_path" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$(id -u)" "$plist_path"
-launchctl kickstart -k "gui/$(id -u)/com.kazuph.tmux-ai-pet"
+launchctl kickstart -k "gui/$(id -u)/${label}"
 
 echo "$plist_path"

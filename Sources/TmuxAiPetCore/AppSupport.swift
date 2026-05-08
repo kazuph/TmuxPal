@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AppSupport {
-    public static let bundleIdentifier = "com.kazuph.tmux-ai-pet"
+    public static let bundleIdentifier = "dev.tmux-ai-pet"
     public static let appName = "tmux-ai-pet"
 
     public static var supportDirectory: URL {

@@ -888,10 +888,11 @@ final class AppServerManager {
     func startIfAvailable() {
         guard process == nil else { return }
         let codexCandidates = [
-            "/Users/kazuph/.local/share/mise/installs/node/22.21.1/bin/codex",
+            ProcessInfo.processInfo.environment["TMUX_AI_PET_CODEX_PATH"],
+            Self.findExecutable("codex"),
             "/opt/homebrew/bin/codex",
             "/usr/local/bin/codex"
-        ]
+        ].compactMap { $0 }
         guard let codexPath = codexCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             return
         }
@@ -920,6 +921,15 @@ final class AppServerManager {
     func stop() {
         process?.terminate()
         process = nil
+    }
+
+    private static func findExecutable(_ name: String) -> String? {
+        let paths = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        return paths
+            .map { URL(fileURLWithPath: $0).appendingPathComponent(name).path }
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 }
 

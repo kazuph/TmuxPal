@@ -22,7 +22,7 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key>
   <string>TmuxAiPet</string>
   <key>CFBundleIdentifier</key>
-  <string>com.kazuph.tmux-ai-pet</string>
+  <string>dev.tmux-ai-pet</string>
   <key>CFBundleName</key>
   <string>TmuxAiPet</string>
   <key>CFBundlePackageType</key>

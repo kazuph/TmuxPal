@@ -9,7 +9,7 @@ final class TmuxAiPetCoreTests: XCTestCase {
         XCTAssertEqual(panes.count, 4)
         XCTAssertEqual(panes.map(\.tool), [.codex, .copilot, .claude, .opencode])
         XCTAssertEqual(panes[0].paneId, "%145")
-        XCTAssertTrue(panes[0].currentPath.hasSuffix("hermes-agent"))
+        XCTAssertTrue(panes[0].currentPath.hasSuffix("sample-agent"))
     }
 
     func testNodeBackedCodexDetectionUsesCommandLineOverride() {
@@ -18,20 +18,20 @@ final class TmuxAiPetCoreTests: XCTestCase {
             "0",
             "1",
             "@1",
-            "hermes-agent",
+            "sample-agent",
             "1",
             "%145",
             "12345",
             "/dev/ttys001",
             "node",
-            "/Users/kazuph/src/github.com/nousresearch/hermes-agent",
+            "/workspace/sample-agent",
             "0",
-            "hermes-agent"
+            "sample-agent"
         ].joined(separator: separator)
 
         let pane = TmuxCollector().parseLine(
             row,
-            commandLineOverride: "node /Users/kazuph/.local/share/mise/installs/node/22.21.1/bin/codex resume --last"
+            commandLineOverride: "node /usr/local/bin/codex resume --last"
         )
 
         XCTAssertEqual(pane?.tool, .codex)
@@ -45,15 +45,15 @@ final class TmuxAiPetCoreTests: XCTestCase {
 
         XCTAssertFalse(summary.contains("Copilot"))
         XCTAssertFalse(summary.contains("2.1"))
-        XCTAssertTrue(summary.contains("homura"))
-        XCTAssertTrue(summary.contains("Mount R2 In Ruby Worker"))
+        XCTAssertTrue(summary.contains("sample-repo"))
+        XCTAssertTrue(summary.contains("Sample build task"))
     }
 
     func testHookEventStoreReadsJsonLines() throws {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         let eventsURL = tempDir.appendingPathComponent("events.jsonl")
-        let payload = #"{"event":"pane-exited","sessionName":"0","windowIndex":"2","windowId":"@2","paneIndex":"1","paneId":"%130","paneCurrentCommand":"copilot","paneCurrentPath":"/tmp/repo","paneTitle":"done","createdAt":"2026-05-07T00:00:00Z"}"#
+        let payload = #"{"event":"pane-exited","sessionName":"0","windowIndex":"2","windowId":"@2","paneIndex":"1","paneId":"%130","paneCurrentCommand":"copilot","paneCurrentPath":"/workspace/sample-repo","paneTitle":"done","createdAt":"2026-05-07T00:00:00Z"}"#
         try payload.write(to: eventsURL, atomically: true, encoding: .utf8)
 
         let events = HookEventStore(eventsURL: eventsURL).readRecent()
@@ -66,7 +66,7 @@ final class TmuxAiPetCoreTests: XCTestCase {
         let transcript = try String(contentsOfFile: fixturePath("codex-working-after-completed.txt"), encoding: .utf8)
         let bubble = PaneBubble(
             pane: makePane(command: "node", transcriptTail: transcript),
-            summary: "kazuph\nRun /review on my current changes"
+            summary: "sample-repo\nRun /review on my current changes"
         )
 
         XCTAssertEqual(BubbleRunClassifier().classify(bubble), .running)
@@ -80,7 +80,7 @@ final class TmuxAiPetCoreTests: XCTestCase {
         """
         let bubble = PaneBubble(
             pane: makePane(command: "node", transcriptTail: transcript),
-            summary: "hermes-agent\n- Cloudflare x Stripe Projects"
+            summary: "sample-agent\n- Review current implementation"
         )
 
         XCTAssertEqual(BubbleRunClassifier().classify(bubble), .complete)
@@ -99,14 +99,14 @@ final class TmuxAiPetCoreTests: XCTestCase {
     func testParsesTmuxClients() {
         let output = [
             "/dev/ttys000|#|0|#|1|#|1",
-            "/dev/ttys003|#|symphony4040|#|1|#|1"
+            "/dev/ttys003|#|other-session|#|1|#|1"
         ].joined(separator: "\n")
 
         let clients = TmuxCollector(tmuxSocketPath: "/tmp/test").parseListClients(output)
 
         XCTAssertEqual(clients, [
             TmuxClient(name: "/dev/ttys000", sessionName: "0", windowIndex: "1", paneIndex: "1"),
-            TmuxClient(name: "/dev/ttys003", sessionName: "symphony4040", windowIndex: "1", paneIndex: "1")
+            TmuxClient(name: "/dev/ttys003", sessionName: "other-session", windowIndex: "1", paneIndex: "1")
         ])
     }
 
@@ -116,7 +116,7 @@ final class TmuxAiPetCoreTests: XCTestCase {
         ])
         let collector = TmuxCollector(tmuxPath: "tmux", tmuxSocketPath: "/tmp/test", runner: runner)
         let pane = makePane(
-            sessionName: "symphony4040",
+            sessionName: "other-session",
             windowIndex: "1",
             paneIndex: "1",
             paneId: "%93",
@@ -127,7 +127,7 @@ final class TmuxAiPetCoreTests: XCTestCase {
         try collector.focus(pane)
 
         XCTAssertTrue(runner.commands.contains { $0.suffix(3) == ["list-clients", "-F", "#{client_name}|#|#{session_name}|#|#{window_index}|#|#{pane_index}"] })
-        XCTAssertTrue(runner.commands.contains { $0.suffix(5) == ["switch-client", "-c", "/dev/ttys000", "-t", "symphony4040:1.1"] })
+        XCTAssertTrue(runner.commands.contains { $0.suffix(5) == ["switch-client", "-c", "/dev/ttys000", "-t", "other-session:1.1"] })
         XCTAssertTrue(runner.commands.contains { $0.suffix(3) == ["select-pane", "-t", "%93"] })
         XCTAssertFalse(runner.commands.contains { $0.contains("select-window") })
     }
@@ -160,7 +160,7 @@ final class TmuxAiPetCoreTests: XCTestCase {
             panePid: "123",
             paneTty: "/dev/ttys001",
             currentCommand: command,
-            currentPath: "/tmp/repo",
+            currentPath: "/workspace/sample-repo",
             active: true,
             title: "repo",
             commandLine: command,
