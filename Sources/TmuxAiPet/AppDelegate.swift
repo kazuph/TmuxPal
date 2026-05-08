@@ -183,10 +183,11 @@ final class OverlayController {
     }
 
     private func fitWindow() {
-        let desired = overlayView.preferredSize()
-        var frame = window.frame
-        frame.size = desired
-        window.setFrame(frame, display: true)
+        updateBubbleLayout()
+        applyPreferredFrame(keepingPetCenter: petScreenCenter())
+        clampToVisibleScreen()
+        updateBubbleLayout()
+        applyPreferredFrame(keepingPetCenter: petScreenCenter())
         clampToVisibleScreen()
     }
 
@@ -195,6 +196,9 @@ final class OverlayController {
         frame.origin.x = screenPoint.x - grabOffset.x
         frame.origin.y = screenPoint.y - grabOffset.y
         window.setFrame(frame, display: true)
+        updateBubbleLayout()
+        applyPreferredFrame(keepingPetCenter: petScreenCenter())
+        clampToVisibleScreen()
         overlayView.setDragging(horizontalDelta: horizontalDelta)
         saveFrame()
     }
@@ -209,14 +213,47 @@ final class OverlayController {
     }
 
     private func clampToVisibleScreen() {
-        guard let screen = NSScreen.screens.first(where: { $0.visibleFrame.intersects(window.frame) }) ?? NSScreen.main else {
+        guard let screen = NSScreen.screens.first(where: { $0.visibleFrame.contains(petScreenCenter()) }) ?? NSScreen.main else {
             return
         }
         var frame = window.frame
         let visible = screen.visibleFrame
-        frame.origin.x = min(max(frame.origin.x, visible.minX), visible.maxX - frame.width)
-        frame.origin.y = min(max(frame.origin.y, visible.minY), visible.maxY - frame.height)
+        let pet = overlayView.petRectInBounds()
+        let petScreen = pet.offsetBy(dx: frame.minX, dy: frame.minY)
+        if petScreen.minX < visible.minX {
+            frame.origin.x += visible.minX - petScreen.minX
+        }
+        if petScreen.maxX > visible.maxX {
+            frame.origin.x -= petScreen.maxX - visible.maxX
+        }
+        if petScreen.minY < visible.minY {
+            frame.origin.y += visible.minY - petScreen.minY
+        }
+        if petScreen.maxY > visible.maxY {
+            frame.origin.y -= petScreen.maxY - visible.maxY
+        }
         window.setFrame(frame, display: true)
+    }
+
+    private func applyPreferredFrame(keepingPetCenter petCenter: CGPoint) {
+        let desired = overlayView.preferredSize()
+        var frame = window.frame
+        frame.size = desired
+        frame.origin.x = petCenter.x - overlayView.petCenterInBounds().x
+        frame.origin.y = petCenter.y - overlayView.petCenterInBounds().y
+        window.setFrame(frame, display: true)
+    }
+
+    private func updateBubbleLayout() {
+        guard let screen = NSScreen.screens.first(where: { $0.visibleFrame.contains(petScreenCenter()) }) ?? NSScreen.main else {
+            return
+        }
+        overlayView.updateBubbleLayout(petCenter: petScreenCenter(), visibleFrame: screen.visibleFrame)
+    }
+
+    private func petScreenCenter() -> CGPoint {
+        let pet = overlayView.petRectInBounds()
+        return CGPoint(x: window.frame.minX + pet.midX, y: window.frame.minY + pet.midY)
     }
 
     private static func savedFrame() -> NSRect {
@@ -241,6 +278,16 @@ final class OverlayController {
 final class OverlayPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+}
+
+private enum BubbleHorizontalSide {
+    case left
+    case right
+}
+
+private enum BubbleVerticalSide {
+    case above
+    case below
 }
 
 @MainActor
@@ -269,6 +316,8 @@ final class OverlayView: NSView {
     private var framesByState: [String: [PetFrame]] = [:]
     private var animationTimer: Timer?
     private let runClassifier = BubbleRunClassifier()
+    private var bubbleHorizontalSide: BubbleHorizontalSide = .left
+    private var bubbleVerticalSide: BubbleVerticalSide = .above
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -297,13 +346,40 @@ final class OverlayView: NSView {
         if collapsed {
             return NSSize(width: petSize.width + padding * 2 + 18, height: petSize.height + padding * 2 + 12)
         }
-        let bubbleStackHeight = CGFloat(count) * bubbleHeight + CGFloat(max(0, count - 1)) * 8
-        let height = max(petSize.height + padding * 2, bubbleStackHeight + padding * 2)
+        let bubbleStackHeight = Self.bubbleStackHeight(for: count)
+        let height = petSize.height + bubbleStackHeight + padding * 3
         return NSSize(width: petSize.width + bubbleWidth + padding * 3, height: height)
+    }
+
+    static func bubbleStackHeight(for count: Int) -> CGFloat {
+        CGFloat(count) * bubbleHeight + CGFloat(max(0, count - 1)) * 8
     }
 
     func preferredSize() -> NSSize {
         Self.size(forBubbleCount: max(1, min(6, bubbles.count)), collapsed: isCollapsed)
+    }
+
+    func updateBubbleLayout(petCenter: CGPoint, visibleFrame: NSRect) {
+        guard !isCollapsed else { return }
+        let count = max(1, min(6, bubbles.count))
+        let stackHeight = Self.bubbleStackHeight(for: count)
+        let requiredHorizontal = Self.bubbleWidth + Self.padding * 2
+        let requiredVertical = stackHeight + Self.padding
+        bubbleHorizontalSide = petCenter.x - Self.petSize.width / 2 - requiredHorizontal < visibleFrame.minX ? .right : .left
+        bubbleVerticalSide = petCenter.y + Self.petSize.height / 2 + requiredVertical > visibleFrame.maxY ? .below : .above
+        if petCenter.y - Self.petSize.height / 2 - requiredVertical < visibleFrame.minY {
+            bubbleVerticalSide = .above
+        }
+        needsDisplay = true
+    }
+
+    func petRectInBounds() -> NSRect {
+        petRect()
+    }
+
+    func petCenterInBounds() -> CGPoint {
+        let pet = petRect()
+        return CGPoint(x: pet.midX, y: pet.midY)
     }
 
     func reloadPetAssets() {
@@ -381,7 +457,7 @@ final class OverlayView: NSView {
     }
 
     private func drawPet() {
-        let petRect = NSRect(x: Self.padding, y: Self.padding, width: Self.petSize.width, height: Self.petSize.height)
+        let petRect = petRect()
         let frames = framesByState[animationState] ?? framesByState["idle"] ?? []
         if let frame = frames.isEmpty ? nil : frames[frameIndex % frames.count] {
             frame.draw(in: petRect)
@@ -393,9 +469,15 @@ final class OverlayView: NSView {
 
     private func drawBubbles() {
         bubbleRects.removeAll()
-        let startX = Self.padding * 2 + Self.petSize.width
-        var y = bounds.height - Self.padding - Self.bubbleHeight
         let visibleBubbles = bubbles.isEmpty ? [placeholderBubble()] : Array(bubbles.prefix(6))
+        let pet = petRect()
+        let startX = bubbleHorizontalSide == .left ? Self.padding : pet.maxX + Self.padding
+        var y: CGFloat
+        if bubbleVerticalSide == .above {
+            y = pet.maxY + Self.padding + Self.bubbleStackHeight(for: visibleBubbles.count) - Self.bubbleHeight
+        } else {
+            y = pet.minY - Self.padding - Self.bubbleHeight
+        }
 
         for bubble in visibleBubbles {
             let rect = NSRect(x: startX, y: y, width: Self.bubbleWidth, height: Self.bubbleHeight)
@@ -542,7 +624,16 @@ final class OverlayView: NSView {
     }
 
     private func petRect() -> NSRect {
-        NSRect(x: Self.padding, y: Self.padding, width: Self.petSize.width, height: Self.petSize.height)
+        if isCollapsed {
+            return NSRect(x: Self.padding, y: Self.padding, width: Self.petSize.width, height: Self.petSize.height)
+        }
+        let x = bubbleHorizontalSide == .left
+            ? bounds.width - Self.padding - Self.petSize.width
+            : Self.padding
+        let y = bubbleVerticalSide == .above
+            ? Self.padding
+            : bounds.height - Self.padding - Self.petSize.height
+        return NSRect(x: x, y: y, width: Self.petSize.width, height: Self.petSize.height)
     }
 
     private func toggleCollapsed() {
