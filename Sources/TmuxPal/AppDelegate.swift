@@ -751,7 +751,7 @@ final class OverlayView: NSView {
     static let padding: CGFloat = 14
     static let expandedEdgePadding: CGFloat = 4
     static let bubblePalGap: CGFloat = 8
-    static let expandedTransparentTopCompensationRatio: CGFloat = 0.24
+    static let expandedTransparentTopCompensationRatio: CGFloat = 0.20
     static let collapsedBadgeSize: CGFloat = 28
     static let collapsedBadgeRightOutset: CGFloat = 32
     static let collapsedBadgeTopOutset: CGFloat = 14
