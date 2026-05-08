@@ -24,7 +24,8 @@ Copilot CLI, and opencode, then shows Dokochan with stacked status bubbles.
 - Toggle "Launch at Login" from the menu bar.
 - tmux hooks append lifecycle events to:
   `~/Library/Application Support/tmuxpal/events.jsonl`.
-- Starts `codex app-server` with `gpt-5.5` and low reasoning when available.
+- Optional `codex app-server` support is available by launching with
+  `TMUXPAL_ENABLE_APP_SERVER=1`.
 
 ## Supported Harnesses
 
@@ -36,8 +37,8 @@ TmuxPal detects these AI coding TUIs when they are running inside tmux panes:
 - opencode: `opencode` command, process arguments, or pane titles.
 
 Detection combines tmux pane metadata, current command, process arguments, and
-pane titles. Hooks improve lifecycle timing, while polling keeps the overlay
-working even when a hook event is missed.
+pane titles. Polling works without hooks; hooks only improve lifecycle timing
+when installed manually.
 
 ## Build And Run
 
@@ -88,8 +89,8 @@ logged-in Aqua GUI session.
 
 ## tmux Hooks
 
-TmuxPal installs lightweight event hooks on app launch. You can also reinstall
-them manually:
+TmuxPal works without hooks by polling tmux. Install hooks manually if you want
+faster lifecycle event updates:
 
 ```bash
 ./Scripts/install-tmux-hooks.sh

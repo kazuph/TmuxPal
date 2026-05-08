@@ -68,6 +68,7 @@ public struct TmuxCollector: Sendable {
     private let tmuxSocketPath: String?
     private let runner: CommandRunning
     private let detector: AiPaneDetector
+    private let transcriptCache = LockedTranscriptCache()
 
     public init(
         tmuxPath: String = "/opt/homebrew/bin/tmux",
@@ -102,10 +103,10 @@ public struct TmuxCollector: Sendable {
             .split(separator: "\n", omittingEmptySubsequences: true)
             .compactMap { line in
                 let text = String(line)
-                let pane = parseLine(text) ?? parseLine(text, commandLineOverride: processCommandLines(forTmuxLine: text))
+                let pane = parseLine(text) ?? parseLine(text, commandLineOverride: cachedProcessCommandLine(forTmuxLine: text))
                 if let pane {
-                    let transcript = captureTranscript(for: pane.paneId)
-                    return pane.withTranscript(excerpt: summarizeTranscript(transcript), tail: transcript)
+                    let transcript = cachedTranscript(for: pane)
+                    return pane.withTranscript(excerpt: transcript.excerpt, tail: transcript.tail)
                 }
                 return nil
             }
@@ -169,11 +170,55 @@ public struct TmuxCollector: Sendable {
         return try? runner.run("/bin/ps", ["-o", "pid=,ppid=,comm=,command=", "-t", tty])
     }
 
+    private func cachedProcessCommandLine(forTmuxLine line: String) -> String? {
+        let parts = line.components(separatedBy: Self.fieldSeparator)
+        guard parts.count >= 12 else {
+            return nil
+        }
+        let paneId = parts[5]
+        let command = parts[8]
+        let title = parts[11]
+        guard shouldInspectProcessCommandLine(command: command, title: title) else {
+            return nil
+        }
+        let signature = "\(command)|\(title)"
+        if let cached = transcriptCache.processCommandLine(for: paneId, signature: signature) {
+            return cached.isEmpty ? nil : cached
+        }
+        let value = processCommandLines(forTmuxLine: line)
+        transcriptCache.storeProcessCommandLine(value, for: paneId, signature: signature)
+        return value
+    }
+
+    private func shouldInspectProcessCommandLine(command: String, title: String) -> Bool {
+        let text = "\(command) \(title)".lowercased()
+        if ["codex", "claude", "copilot", "opencode"].contains(where: text.contains) {
+            return true
+        }
+        return ["node", "bun", "deno", "npm", "npx", "pnpm", "yarn"].contains(command.lowercased())
+    }
+
     private func captureTranscript(for paneId: String) -> String {
-        guard let output = try? runTmux(["capture-pane", "-p", "-J", "-t", paneId, "-S", "-24"]) else {
+        guard let output = try? runTmux(["capture-pane", "-p", "-J", "-t", paneId, "-S", "-16"]) else {
             return ""
         }
         return output
+    }
+
+    private func cachedTranscript(for pane: TmuxPane) -> (excerpt: String, tail: String) {
+        let signature = [
+            pane.currentCommand,
+            pane.title,
+            pane.windowName,
+            pane.active ? "1" : "0"
+        ].joined(separator: "|")
+        if let cached = transcriptCache.transcript(for: pane.paneId, signature: signature) {
+            return cached
+        }
+        let transcript = captureTranscript(for: pane.paneId)
+        let excerpt = summarizeTranscript(transcript)
+        transcriptCache.storeTranscript(excerpt: excerpt, tail: transcript, for: pane.paneId, signature: signature)
+        return (excerpt, transcript)
     }
 
     private func summarizeTranscript(_ output: String) -> String {
@@ -271,5 +316,60 @@ public struct TmuxCollector: Sendable {
             return path
         }
         return nil
+    }
+}
+
+private final class LockedTranscriptCache: @unchecked Sendable {
+    private struct StringEntry {
+        let signature: String
+        let value: String
+        let createdAt: Date
+    }
+
+    private struct TranscriptEntry {
+        let signature: String
+        let excerpt: String
+        let tail: String
+        let createdAt: Date
+    }
+
+    private let lock = NSLock()
+    private var transcripts: [String: TranscriptEntry] = [:]
+    private var processCommandLines: [String: StringEntry] = [:]
+    private let transcriptTTL: TimeInterval = 6
+    private let processCommandLineTTL: TimeInterval = 30
+
+    func transcript(for paneId: String, signature: String) -> (excerpt: String, tail: String)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = transcripts[paneId],
+              entry.signature == signature,
+              Date().timeIntervalSince(entry.createdAt) < transcriptTTL else {
+            return nil
+        }
+        return (entry.excerpt, entry.tail)
+    }
+
+    func storeTranscript(excerpt: String, tail: String, for paneId: String, signature: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        transcripts[paneId] = TranscriptEntry(signature: signature, excerpt: excerpt, tail: tail, createdAt: Date())
+    }
+
+    func processCommandLine(for paneId: String, signature: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = processCommandLines[paneId],
+              entry.signature == signature,
+              Date().timeIntervalSince(entry.createdAt) < processCommandLineTTL else {
+            return nil
+        }
+        return entry.value
+    }
+
+    func storeProcessCommandLine(_ value: String?, for paneId: String, signature: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        processCommandLines[paneId] = StringEntry(signature: signature, value: value ?? "", createdAt: Date())
     }
 }

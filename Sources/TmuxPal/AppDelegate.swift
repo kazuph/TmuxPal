@@ -24,10 +24,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.overlayController = overlayController
         overlayController.show()
 
-        let appServerManager = AppServerManager()
-        self.appServerManager = appServerManager
-        appServerManager.startIfAvailable()
-        TmuxHookInstaller.installHooks()
+        if ProcessInfo.processInfo.environment["TMUXPAL_ENABLE_APP_SERVER"] == "1" {
+            let appServerManager = AppServerManager()
+            self.appServerManager = appServerManager
+            appServerManager.startIfAvailable()
+        }
+        if ProcessInfo.processInfo.environment["TMUXPAL_AUTO_INSTALL_HOOKS"] == "1" {
+            TmuxHookInstaller.installHooks()
+        }
 
         configureStatusItem()
     }
@@ -514,8 +518,8 @@ final class OverlayController {
         window.ignoresMouseEvents = false
         DebugLog.write("overlay initialized frame=\(NSStringFromRect(window.frame))")
 
-        overlayView.onDrag = { [weak self] screenPoint, grabOffset, horizontalDelta in
-            self?.moveWindow(toScreenPoint: screenPoint, grabOffset: grabOffset, horizontalDelta: horizontalDelta)
+        overlayView.onDrag = { [weak self] screenPoint, palGrabOffset, horizontalDelta in
+            self?.moveWindow(toScreenPoint: screenPoint, palGrabOffset: palGrabOffset, horizontalDelta: horizontalDelta)
         }
         overlayView.onClickPane = { [weak self] pane in
             do {
@@ -569,7 +573,7 @@ final class OverlayController {
 
     private func startTimer() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.updatePanes()
             }
@@ -637,13 +641,14 @@ final class OverlayController {
         palAnchorScreenCenter = clampToVisibleScreen()
     }
 
-    private func moveWindow(toScreenPoint screenPoint: CGPoint, grabOffset: CGPoint, horizontalDelta: CGFloat) {
-        var frame = window.frame
-        frame.origin.x = screenPoint.x - grabOffset.x
-        frame.origin.y = screenPoint.y - grabOffset.y
-        window.setFrame(frame, display: true)
-        updateBubbleLayout()
-        applyPreferredFrame(keepingPalCenter: palScreenCenter())
+    private func moveWindow(toScreenPoint screenPoint: CGPoint, palGrabOffset: CGPoint, horizontalDelta: CGFloat) {
+        let pal = overlayView.palRectInBounds()
+        let targetPalCenter = CGPoint(
+            x: screenPoint.x - palGrabOffset.x + pal.width / 2,
+            y: screenPoint.y - palGrabOffset.y + pal.height / 2
+        )
+        updateBubbleLayout(forPalCenter: targetPalCenter)
+        applyPreferredFrame(keepingPalCenter: targetPalCenter)
         palAnchorScreenCenter = clampToVisibleScreen()
         overlayView.setDragging(horizontalDelta: horizontalDelta)
         saveFrame()
@@ -743,11 +748,19 @@ private enum BubbleVerticalSide {
     case below
 }
 
+private enum BubbleDensity {
+    case regular
+    case compact
+    case singleLine
+}
+
 @MainActor
 final class OverlayView: NSView {
     static let basePalSize = NSSize(width: 77, height: 85)
     static let bubbleWidth: CGFloat = 280
-    static let bubbleHeight: CGFloat = 76
+    static let regularBubbleHeight: CGFloat = 76
+    static let compactBubbleHeight: CGFloat = 64
+    static let singleLineBubbleHeight: CGFloat = 46
     static let padding: CGFloat = 14
     static let expandedEdgePadding: CGFloat = 4
     static let bubblePalGap: CGFloat = 8
@@ -757,7 +770,7 @@ final class OverlayView: NSView {
     static let collapsedBadgeTopOutset: CGFloat = 14
     static let collapsedBadgeHorizontalAnchor: CGFloat = 0.72
 
-    var onDrag: ((_ screenPoint: CGPoint, _ grabOffset: CGPoint, _ horizontalDelta: CGFloat) -> Void)?
+    var onDrag: ((_ screenPoint: CGPoint, _ palGrabOffset: CGPoint, _ horizontalDelta: CGFloat) -> Void)?
     var onClickPane: ((TmuxPane) -> Void)?
     var onCollapseChanged: (() -> Void)?
 
@@ -779,7 +792,8 @@ final class OverlayView: NSView {
     private var palAssetConfig: PalAssetConfig
     private var palScale = PalSettings.displaySize.scale
     private let runClassifier = BubbleRunClassifier()
-    private let badgeCounter = BubbleBadgeCounter()
+    private var runStatesByPaneId: [String: BubbleRunState] = [:]
+    private var completedBubbleCount = 0
     private var bubbleHorizontalSide: BubbleHorizontalSide = .left
     private var bubbleVerticalSide: BubbleVerticalSide = .above
 
@@ -787,7 +801,7 @@ final class OverlayView: NSView {
         self.palAssetConfig = palAssetConfig
         super.init(frame: frameRect)
         reloadPalAssets()
-        animationTimer = Timer.scheduledTimer(withTimeInterval: 0.16, repeats: true) { [weak self] _ in
+        animationTimer = Timer.scheduledTimer(withTimeInterval: 0.24, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.advanceAnimation()
             }
@@ -835,7 +849,29 @@ final class OverlayView: NSView {
     }
 
     static func bubbleStackHeight(for count: Int) -> CGFloat {
-        CGFloat(count) * bubbleHeight + CGFloat(max(0, count - 1)) * 8
+        CGFloat(count) * bubbleHeight(for: count) + CGFloat(max(0, count - 1)) * bubbleGap(for: count)
+    }
+
+    static func bubbleHeight(for count: Int) -> CGFloat {
+        switch density(for: count) {
+        case .regular: regularBubbleHeight
+        case .compact: compactBubbleHeight
+        case .singleLine: singleLineBubbleHeight
+        }
+    }
+
+    static func bubbleGap(for count: Int) -> CGFloat {
+        density(for: count) == .singleLine ? 6 : 8
+    }
+
+    private static func density(for count: Int) -> BubbleDensity {
+        if count >= 6 {
+            return .singleLine
+        }
+        if count >= 4 {
+            return .compact
+        }
+        return .regular
     }
 
     func preferredSize() -> NSSize {
@@ -907,6 +943,10 @@ final class OverlayView: NSView {
             }
             return lhs.pane.sessionName < rhs.pane.sessionName
         }
+        runStatesByPaneId = Dictionary(uniqueKeysWithValues: self.bubbles.map { bubble in
+            (bubble.pane.paneId, runClassifier.classify(bubble))
+        })
+        completedBubbleCount = runStatesByPaneId.values.filter { $0 == .complete }.count
         if bubbles.isEmpty {
             setAnimationState("waiting")
         } else if bubbles.contains(where: { $0.lastEvent?.event.contains("exited") == true || $0.lastEvent?.event.contains("died") == true }) {
@@ -933,11 +973,15 @@ final class OverlayView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        drawPal()
+        if dirtyRect.intersects(palRect()) {
+            drawPal()
+        }
         if isCollapsed {
-            drawCollapsedBadge()
+            if dirtyRect.intersects(collapsedBadgeRect()) {
+                drawCollapsedBadge()
+            }
         } else {
-            drawBubbles()
+            drawBubbles(dirtyRect: dirtyRect)
         }
     }
 
@@ -964,30 +1008,47 @@ final class OverlayView: NSView {
         }
     }
 
-    private func drawBubbles() {
+    private func drawBubbles(dirtyRect: NSRect) {
         bubbleRects.removeAll()
+        for (rect, bubble) in bubbleLayoutRects() {
+            if dirtyRect.intersects(rect) {
+                drawBubble(rect: rect, bubble: bubble, dirtyRect: dirtyRect)
+            }
+            bubbleRects.append((rect, bubble.pane))
+        }
+    }
+
+    private func bubbleLayoutRects() -> [(NSRect, PaneBubble)] {
         let visibleBubbles = bubbles.isEmpty ? [placeholderBubble()] : Array(bubbles.prefix(6))
+        let count = visibleBubbles.count
+        let bubbleHeight = Self.bubbleHeight(for: count)
+        let bubbleGap = Self.bubbleGap(for: count)
         let pal = palRect()
         let startX = bubbleHorizontalSide == .left
             ? pal.maxX - Self.bubbleWidth
             : pal.minX
-        var y: CGFloat
+        let firstY: CGFloat
         if bubbleVerticalSide == .above {
             let visualTop = pal.maxY - Self.expandedTransparentTopCompensation(for: palSize)
-            y = visualTop + Self.bubblePalGap + Self.bubbleStackHeight(for: visibleBubbles.count) - Self.bubbleHeight
+            firstY = visualTop + Self.bubblePalGap + Self.bubbleStackHeight(for: count) - bubbleHeight
         } else {
-            y = pal.minY - Self.bubblePalGap - Self.bubbleHeight
+            firstY = pal.minY - Self.bubblePalGap - bubbleHeight
         }
-
-        for bubble in visibleBubbles {
-            let rect = NSRect(x: startX, y: y, width: Self.bubbleWidth, height: Self.bubbleHeight)
-            drawBubble(rect: rect, bubble: bubble)
-            bubbleRects.append((rect, bubble.pane))
-            y -= Self.bubbleHeight + 8
+        return visibleBubbles.enumerated().map { index, bubble in
+            let y = firstY - CGFloat(index) * (bubbleHeight + bubbleGap)
+            return (NSRect(x: startX, y: y, width: Self.bubbleWidth, height: bubbleHeight), bubble)
         }
     }
 
-    private func drawBubble(rect: NSRect, bubble: PaneBubble) {
+    private func drawBubble(rect: NSRect, bubble: PaneBubble, dirtyRect: NSRect) {
+        let statusRect = statusRect(in: rect)
+        if dirtyRect.width <= statusRect.width + 8,
+           dirtyRect.height <= statusRect.height + 8,
+           dirtyRect.intersects(statusRect.insetBy(dx: -2, dy: -2)) {
+            drawStatus(in: statusRect, state: runState(for: bubble))
+            return
+        }
+
         let path = NSBezierPath(roundedRect: rect, xRadius: 13, yRadius: 13)
         NSColor.white.withAlphaComponent(0.92).setFill()
         path.fill()
@@ -1006,16 +1067,27 @@ final class OverlayView: NSView {
         let headline = parts.first ?? bubble.summary
         let detail = parts.count > 1 ? parts[1] : ""
         let location = locationLabel(for: bubble.pane)
-        let statusSize: CGFloat = 16
-        let statusRect = NSRect(x: rect.maxX - 12 - statusSize, y: rect.maxY - 24, width: statusSize, height: statusSize)
+        let bubbleDensity = Self.density(for: max(1, min(6, bubbles.count)))
         drawStatus(in: statusRect, state: runState(for: bubble))
+
+        if bubbleDensity == .singleLine {
+            drawSingleLineBubbleText(
+                headline: headline,
+                detail: detail,
+                in: rect,
+                locationWidth: locationWidth(for: location),
+                statusRect: statusRect
+            )
+            drawLocation(location, in: rect, statusRect: statusRect, paragraph: paragraph)
+            return
+        }
 
         let locationAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
             .foregroundColor: NSColor(calibratedWhite: 0.50, alpha: 0.82),
             .paragraphStyle: paragraph
         ]
-        let locationWidth = min(112, max(30, NSString(string: location).size(withAttributes: locationAttrs).width + 2))
+        let locationWidth = locationWidth(for: location)
         let locationRect = NSRect(x: statusRect.minX - 6 - locationWidth, y: rect.maxY - 24, width: locationWidth, height: 16)
         NSString(string: location).draw(in: locationRect, withAttributes: locationAttrs)
 
@@ -1031,9 +1103,76 @@ final class OverlayView: NSView {
                 .foregroundColor: NSColor(calibratedWhite: 0.45, alpha: 1.0),
                 .paragraphStyle: detailParagraph
             ]
-            let detailRect = NSRect(x: rect.minX + 12, y: rect.minY + 10, width: rect.width - 24, height: 34)
-            detail.twoLineTruncated(width: detailRect.width, attributes: detailAttrs)
-                .draw(in: detailRect, withAttributes: detailAttrs)
+            let detailRect = detailRect(in: rect, density: bubbleDensity)
+            let detailText = bubbleDensity == .compact
+                ? NSString(string: detail)
+                : detail.twoLineTruncated(width: detailRect.width, attributes: detailAttrs)
+            detailText.draw(in: detailRect, withAttributes: detailAttrs)
+        }
+    }
+
+    private func drawSingleLineBubbleText(
+        headline: String,
+        detail: String,
+        in rect: NSRect,
+        locationWidth: CGFloat,
+        statusRect: NSRect
+    ) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let text = NSMutableAttributedString(
+            string: headline,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+                .foregroundColor: NSColor(calibratedWhite: 0.14, alpha: 1.0),
+                .paragraphStyle: paragraph
+            ]
+        )
+        if !detail.isEmpty {
+            text.append(NSAttributedString(
+                string: " \(detail)",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 12, weight: .regular),
+                    .foregroundColor: NSColor(calibratedWhite: 0.45, alpha: 1.0),
+                    .paragraphStyle: paragraph
+                ]
+            ))
+        }
+        let textRect = NSRect(
+            x: rect.minX + 12,
+            y: rect.midY - 10,
+            width: max(40, statusRect.minX - rect.minX - locationWidth - 30),
+            height: 21
+        )
+        text.draw(in: textRect)
+    }
+
+    private func drawLocation(_ location: String, in rect: NSRect, statusRect: NSRect, paragraph: NSParagraphStyle) {
+        let locationWidth = locationWidth(for: location)
+        let locationAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor(calibratedWhite: 0.50, alpha: 0.82),
+            .paragraphStyle: paragraph
+        ]
+        let locationRect = NSRect(x: statusRect.minX - 6 - locationWidth, y: rect.maxY - 24, width: locationWidth, height: 16)
+        NSString(string: location).draw(in: locationRect, withAttributes: locationAttrs)
+    }
+
+    private func locationWidth(for location: String) -> CGFloat {
+        let locationAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        ]
+        return min(112, max(30, NSString(string: location).size(withAttributes: locationAttrs).width + 2))
+    }
+
+    private func detailRect(in rect: NSRect, density: BubbleDensity) -> NSRect {
+        switch density {
+        case .regular:
+            return NSRect(x: rect.minX + 12, y: rect.minY + 10, width: rect.width - 24, height: 34)
+        case .compact:
+            return NSRect(x: rect.minX + 12, y: rect.minY + 11, width: rect.width - 24, height: 18)
+        case .singleLine:
+            return .zero
         }
     }
 
@@ -1058,28 +1197,18 @@ final class OverlayView: NSView {
             spinner.stroke()
             return
         }
-        green.withAlphaComponent(0.14).setFill()
+        green.setFill()
         path.fill()
-        green.setStroke()
-        path.lineWidth = 1
-        path.stroke()
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 10, weight: .bold),
-            .foregroundColor: green
+            .font: NSFont.systemFont(ofSize: 11, weight: .bold),
+            .foregroundColor: NSColor.white
         ]
-        NSString(string: "✓").draw(in: rect.insetBy(dx: 3.5, dy: 1.2), withAttributes: attrs)
+        NSString(string: "✓").draw(in: rect.insetBy(dx: 3.2, dy: 0.9), withAttributes: attrs)
     }
 
     private func drawCollapsedBadge() {
         let count = completedAwaitingCount()
-        let pal = palRect()
-        let badgeSize = Self.collapsedBadgeSize
-        let rect = NSRect(
-            x: pal.minX + palSize.width * Self.collapsedBadgeHorizontalAnchor,
-            y: pal.maxY - badgeSize + Self.collapsedBadgeTopOutset,
-            width: badgeSize,
-            height: badgeSize
-        )
+        let rect = collapsedBadgeRect()
         let path = NSBezierPath(ovalIn: rect)
         NSColor(calibratedRed: 0.04, green: 0.63, blue: 0.25, alpha: 1).setFill()
         path.fill()
@@ -1151,11 +1280,11 @@ final class OverlayView: NSView {
     }
 
     private func completedAwaitingCount() -> Int {
-        badgeCounter.completedAwaitingCount(in: bubbles)
+        completedBubbleCount
     }
 
     private func runState(for bubble: PaneBubble) -> BubbleRunState {
-        runClassifier.classify(bubble)
+        runStatesByPaneId[bubble.pane.paneId] ?? .complete
     }
 
     private func advanceAnimation() {
@@ -1165,7 +1294,30 @@ final class OverlayView: NSView {
         } else if isHovering {
             animationState = "jumping"
         }
-        needsDisplay = true
+        setNeedsDisplay(palRect())
+        if isCollapsed {
+            setNeedsDisplay(collapsedBadgeRect())
+        } else {
+            for (rect, bubble) in bubbleLayoutRects() where runState(for: bubble) == .running {
+                setNeedsDisplay(statusRect(in: rect).insetBy(dx: -2, dy: -2))
+            }
+        }
+    }
+
+    private func statusRect(in bubbleRect: NSRect) -> NSRect {
+        let statusSize: CGFloat = 16
+        return NSRect(x: bubbleRect.maxX - 12 - statusSize, y: bubbleRect.maxY - 24, width: statusSize, height: statusSize)
+    }
+
+    private func collapsedBadgeRect() -> NSRect {
+        let pal = palRect()
+        let badgeSize = Self.collapsedBadgeSize
+        return NSRect(
+            x: pal.minX + palSize.width * Self.collapsedBadgeHorizontalAnchor,
+            y: pal.maxY - badgeSize + Self.collapsedBadgeTopOutset,
+            width: badgeSize,
+            height: badgeSize
+        )
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -1187,17 +1339,23 @@ final class OverlayView: NSView {
     override func mouseDown(with event: NSEvent) {
         isHovering = false
         didDrag = false
+        let point = convert(event.locationInWindow, from: nil)
+        guard palRect().contains(point) else {
+            dragGrabOffset = nil
+            return
+        }
         let screenPoint = NSEvent.mouseLocation
         lastDragScreenPoint = screenPoint
-        guard let window else { return }
-        dragGrabOffset = CGPoint(x: screenPoint.x - window.frame.minX, y: screenPoint.y - window.frame.minY)
+        let pal = palRect()
+        dragGrabOffset = CGPoint(x: point.x - pal.minX, y: point.y - pal.minY)
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let previous = lastDragScreenPoint, let grabOffset = dragGrabOffset else { return }
         let current = NSEvent.mouseLocation
         let horizontalDelta = current.x - previous.x
-        if abs(horizontalDelta) > 0.5 {
+        let verticalDelta = current.y - previous.y
+        if hypot(horizontalDelta, verticalDelta) > 0.5 {
             didDrag = true
         }
         lastDragScreenPoint = current

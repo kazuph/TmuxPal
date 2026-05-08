@@ -152,6 +152,31 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertFalse(runner.commands.contains { $0.contains("select-window") })
     }
 
+    func testCollectDoesNotInspectPlainShellPaneProcessList() throws {
+        let row = tmuxRow(command: "zsh", title: "shell")
+        let runner = RecordingRunner(outputs: [
+            "list-panes": row
+        ])
+        let collector = TmuxCollector(tmuxPath: "tmux", tmuxSocketPath: "/tmp/test", runner: runner)
+
+        _ = try collector.collect()
+
+        XCTAssertFalse(runner.commands.contains { $0.first == "-o" })
+    }
+
+    func testCollectCachesNegativeProcessLineInspection() throws {
+        let row = tmuxRow(command: "node", title: "vite dev server")
+        let runner = RecordingRunner(outputs: [
+            "list-panes": row
+        ])
+        let collector = TmuxCollector(tmuxPath: "tmux", tmuxSocketPath: "/tmp/test", runner: runner)
+
+        _ = try collector.collect()
+        _ = try collector.collect()
+
+        XCTAssertEqual(runner.commands.filter { $0.first == "-o" }.count, 1)
+    }
+
     private func fixturePath(_ name: String) -> String {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -189,6 +214,23 @@ final class TmuxPalCoreTests: XCTestCase {
             tool: .codex,
             status: .selected
         )
+    }
+
+    private func tmuxRow(command: String, title: String) -> String {
+        [
+            "0",
+            "1",
+            "@1",
+            "sample-agent",
+            "1",
+            "%145",
+            "12345",
+            "/dev/ttys001",
+            command,
+            "/workspace/sample-agent",
+            "0",
+            title
+        ].joined(separator: TmuxCollector.fieldSeparator)
     }
 }
 
