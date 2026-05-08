@@ -15,6 +15,8 @@ Copilot CLI, and opencode, then shows Dokochan with stacked status bubbles.
 - Menu bar app only: no Dock icon and no settings window.
 - Select a custom pet from the menu bar by choosing a folder that contains
   `pet.json`.
+- Select pet size from the menu bar. The current display size is `Small`; `Medium`
+  and `Large` scale the pet while preserving its screen position.
 - Toggle "Launch at Login" from the menu bar.
 - Optional tmux hooks append lifecycle events to:
   `~/Library/Application Support/tmux-ai-pet/events.jsonl`.

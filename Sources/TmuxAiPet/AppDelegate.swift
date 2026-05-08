@@ -50,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(petSelectionMenuItem())
         menu.addItem(NSMenuItem(title: "デフォルトのどこちゃんに戻す", action: #selector(useDefaultPet), keyEquivalent: ""))
+        menu.addItem(petSizeMenuItem())
         menu.addItem(.separator())
         let loginItem = NSMenuItem(title: "ログイン時に起動", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.state = LoginItemManager.isEnabled ? .on : .off
@@ -77,6 +78,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.state = PetSettings.selectedPetDirectory?.standardizedFileURL == directory.standardizedFileURL ? .on : .off
                 submenu.addItem(item)
             }
+        }
+
+        rootItem.submenu = submenu
+        return rootItem
+    }
+
+    private func petSizeMenuItem() -> NSMenuItem {
+        let rootItem = NSMenuItem(title: "サイズ", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+
+        for size in PetDisplaySize.allCases {
+            let item = NSMenuItem(title: size.label, action: #selector(selectPetSize(_:)), keyEquivalent: "")
+            item.representedObject = size.rawValue
+            item.state = PetSettings.displaySize == size ? .on : .off
+            submenu.addItem(item)
         }
 
         rootItem.submenu = submenu
@@ -129,6 +145,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildStatusMenu()
     }
 
+    @objc private func selectPetSize(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let size = PetDisplaySize(rawValue: rawValue) else {
+            return
+        }
+        PetSettings.displaySize = size
+        overlayController?.setPetDisplaySize(size)
+        rebuildStatusMenu()
+    }
+
     @objc private func toggleLaunchAtLogin() {
         do {
             try LoginItemManager.setEnabled(!LoginItemManager.isEnabled)
@@ -157,6 +183,7 @@ enum SingleInstanceGuard {
 
 enum PetSettings {
     private static let selectedPetDirectoryKey = "selectedPetDirectory"
+    private static let displaySizeKey = "petDisplaySize"
     private static let userPetRoot = FileManager.default
         .homeDirectoryForCurrentUser
         .appendingPathComponent(".codex/pets")
@@ -186,6 +213,19 @@ enum PetSettings {
             return PetAssetConfig(metadataURL: bundled.appendingPathComponent("pet.json"))
         }
         return PetAssetConfig()
+    }
+
+    static var displaySize: PetDisplaySize {
+        get {
+            guard let rawValue = UserDefaults.standard.string(forKey: displaySizeKey),
+                  let size = PetDisplaySize(rawValue: rawValue) else {
+                return .small
+            }
+            return size
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: displaySizeKey)
+        }
     }
 
     static func discoveredPetDirectories() -> [URL] {
@@ -230,6 +270,28 @@ enum PetSettings {
             return url.deletingLastPathComponent()
         }
         return nil
+    }
+}
+
+enum PetDisplaySize: String, CaseIterable {
+    case small
+    case medium
+    case large
+
+    var label: String {
+        switch self {
+        case .small: return "小"
+        case .medium: return "中"
+        case .large: return "大"
+        }
+    }
+
+    var scale: CGFloat {
+        switch self {
+        case .small: return 1.0
+        case .medium: return 1.2
+        case .large: return 1.4
+        }
     }
 }
 
@@ -322,6 +384,13 @@ final class OverlayController {
 
     func reloadPetAssets() {
         overlayView.reloadPetAssets(config: PetSettings.assetConfig())
+    }
+
+    func setPetDisplaySize(_ size: PetDisplaySize) {
+        let petCenter = petScreenCenter()
+        overlayView.setPetScale(size.scale)
+        fitWindow(keepingPetCenter: petCenter)
+        saveFrame()
     }
 
     private func startTimer() {
@@ -502,7 +571,7 @@ private enum BubbleVerticalSide {
 
 @MainActor
 final class OverlayView: NSView {
-    static let petSize = NSSize(width: 77, height: 85)
+    static let basePetSize = NSSize(width: 77, height: 85)
     static let bubbleWidth: CGFloat = 280
     static let bubbleHeight: CGFloat = 76
     static let padding: CGFloat = 14
@@ -528,6 +597,7 @@ final class OverlayView: NSView {
     private var framesByState: [String: [PetFrame]] = [:]
     private var animationTimer: Timer?
     private var petAssetConfig: PetAssetConfig
+    private var petScale = PetSettings.displaySize.scale
     private let runClassifier = BubbleRunClassifier()
     private var bubbleHorizontalSide: BubbleHorizontalSide = .left
     private var bubbleVerticalSide: BubbleVerticalSide = .above
@@ -556,7 +626,14 @@ final class OverlayView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    static func size(forBubbleCount count: Int, collapsed: Bool) -> NSSize {
+    private var petSize: NSSize {
+        NSSize(
+            width: Self.basePetSize.width * petScale,
+            height: Self.basePetSize.height * petScale
+        )
+    }
+
+    static func size(forBubbleCount count: Int, collapsed: Bool, petSize: NSSize) -> NSSize {
         if collapsed {
             return NSSize(width: petSize.width + padding * 2, height: petSize.height + padding * 2)
         }
@@ -570,7 +647,7 @@ final class OverlayView: NSView {
     }
 
     func preferredSize() -> NSSize {
-        Self.size(forBubbleCount: max(1, min(6, bubbles.count)), collapsed: isCollapsed)
+        Self.size(forBubbleCount: max(1, min(6, bubbles.count)), collapsed: isCollapsed, petSize: petSize)
     }
 
     func updateBubbleLayout(petCenter: CGPoint, visibleFrame: NSRect) {
@@ -579,9 +656,10 @@ final class OverlayView: NSView {
         let stackHeight = Self.bubbleStackHeight(for: count)
         let requiredHorizontal = Self.bubbleWidth + Self.padding * 2
         let requiredVertical = stackHeight + Self.padding
-        bubbleHorizontalSide = petCenter.x - Self.petSize.width / 2 - requiredHorizontal < visibleFrame.minX ? .right : .left
-        bubbleVerticalSide = petCenter.y + Self.petSize.height / 2 + requiredVertical > visibleFrame.maxY ? .below : .above
-        if petCenter.y - Self.petSize.height / 2 - requiredVertical < visibleFrame.minY {
+        let size = petSize
+        bubbleHorizontalSide = petCenter.x - size.width / 2 - requiredHorizontal < visibleFrame.minX ? .right : .left
+        bubbleVerticalSide = petCenter.y + size.height / 2 + requiredVertical > visibleFrame.maxY ? .below : .above
+        if petCenter.y - size.height / 2 - requiredVertical < visibleFrame.minY {
             bubbleVerticalSide = .above
         }
         needsDisplay = true
@@ -607,6 +685,11 @@ final class OverlayView: NSView {
         }
         framesByState = PetSpriteLoader(config: petAssetConfig).loadFrames()
         DebugLog.write("pet assets loaded states=\(framesByState.keys.sorted().joined(separator: ","))")
+        needsDisplay = true
+    }
+
+    func setPetScale(_ scale: CGFloat) {
+        petScale = scale
         needsDisplay = true
     }
 
@@ -799,8 +882,8 @@ final class OverlayView: NSView {
         let pet = petRect()
         let badgeSize: CGFloat = 28
         let rect = NSRect(
-            x: pet.midX + Self.petSize.width * 0.04,
-            y: pet.midY + Self.petSize.height * 0.10,
+            x: pet.midX + petSize.width * 0.04,
+            y: pet.midY + petSize.height * 0.10,
             width: badgeSize,
             height: badgeSize
         )
@@ -853,16 +936,17 @@ final class OverlayView: NSView {
     }
 
     private func petRect(in bounds: NSRect) -> NSRect {
+        let size = petSize
         if isCollapsed {
-            return NSRect(x: Self.padding, y: Self.padding, width: Self.petSize.width, height: Self.petSize.height)
+            return NSRect(x: Self.padding, y: Self.padding, width: size.width, height: size.height)
         }
         let x = bubbleHorizontalSide == .left
-            ? bounds.width - Self.padding - Self.petSize.width
+            ? bounds.width - Self.padding - size.width
             : Self.padding
         let y = bubbleVerticalSide == .above
             ? Self.padding
-            : bounds.height - Self.padding - Self.petSize.height
-        return NSRect(x: x, y: y, width: Self.petSize.width, height: Self.petSize.height)
+            : bounds.height - Self.padding - size.height
+        return NSRect(x: x, y: y, width: size.width, height: size.height)
     }
 
     private func toggleCollapsed() {
