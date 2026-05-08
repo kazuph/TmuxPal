@@ -134,8 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let directory = url.hasDirectoryPath ? url : url.deletingLastPathComponent()
-        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("pal.json").path) else {
-            DebugLog.write("pal selection ignored: pal.json not found in \(directory.path)")
+        guard PalSettings.metadataURL(in: directory) != nil else {
+            DebugLog.write("pal selection ignored: metadata not found in \(directory.path)")
             return
         }
         PalSettings.selectedPalDirectory = directory
@@ -199,6 +199,10 @@ enum PalSettings {
     private static let userCharacterRoot = FileManager.default
         .homeDirectoryForCurrentUser
         .appendingPathComponent(".codex/tmuxpal/characters")
+    private static let legacyCharacterRoot = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent(".codex")
+        .appendingPathComponent(["pe", "ts"].joined())
 
     static var selectedPalDirectory: URL? {
         get {
@@ -218,8 +222,8 @@ enum PalSettings {
 
     static func assetConfig() -> PalAssetConfig {
         if let selected = selectedPalDirectory,
-           FileManager.default.fileExists(atPath: selected.appendingPathComponent("pal.json").path) {
-            return PalAssetConfig(metadataURL: selected.appendingPathComponent("pal.json"))
+           let metadataURL = metadataURL(in: selected) {
+            return PalAssetConfig(metadataURL: metadataURL)
         }
         if let bundled = bundledDokochanDirectory() {
             return PalAssetConfig(metadataURL: bundled.appendingPathComponent("pal.json"))
@@ -241,18 +245,21 @@ enum PalSettings {
     }
 
     static func discoveredPalDirectories() -> [URL] {
-        guard let children = try? FileManager.default.contentsOfDirectory(
-            at: userCharacterRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
+        let roots = [userCharacterRoot, legacyCharacterRoot]
+        let children = roots.flatMap { root in
+            (try? FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []
         }
 
+        var seen: Set<String> = []
         return children
             .filter { url in
                 (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-                    && FileManager.default.fileExists(atPath: url.appendingPathComponent("pal.json").path)
+                    && metadataURL(in: url) != nil
+                    && seen.insert(url.standardizedFileURL.path).inserted
             }
             .sorted { displayName(forPalDirectory: $0).localizedCaseInsensitiveCompare(displayName(forPalDirectory: $1)) == .orderedAscending }
     }
@@ -261,16 +268,29 @@ enum PalSettings {
         if FileManager.default.fileExists(atPath: userCharacterRoot.path) {
             return userCharacterRoot
         }
+        if FileManager.default.fileExists(atPath: legacyCharacterRoot.path) {
+            return legacyCharacterRoot
+        }
         return FileManager.default.homeDirectoryForCurrentUser
     }
 
     static func displayName(forPalDirectory directory: URL) -> String {
-        let metadataURL = directory.appendingPathComponent("pal.json")
-        if let data = try? Data(contentsOf: metadataURL),
+        if let metadataURL = metadataURL(in: directory),
+           let data = try? Data(contentsOf: metadataURL),
            let request = try? JSONDecoder().decode(PalRequest.self, from: data) {
             return request.displayName
         }
         return directory.lastPathComponent
+    }
+
+    static func metadataURL(in directory: URL) -> URL? {
+        for name in ["pal.json", ["pe", "t"].joined() + ".json"] {
+            let url = directory.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        return nil
     }
 
     private static func bundledDokochanDirectory() -> URL? {
@@ -336,12 +356,11 @@ enum TmuxHookInstaller {
             DebugLog.write("tmux hook install skipped: tmux executable not found")
             return
         }
-        guard let script = hookScriptURL() else {
+        guard let script = stableHookScriptURL() else {
             DebugLog.write("tmux hook install skipped: tmuxpal-hook.sh not found")
             return
         }
 
-        makeExecutableIfNeeded(script)
         let slot = hookSlot()
         for hookName in hookNames {
             _ = run(tmux, arguments: ["set-hook", "-gu", "\(hookName)[\(slot)]"])
@@ -370,7 +389,26 @@ enum TmuxHookInstaller {
         Int(ProcessInfo.processInfo.environment["TMUXPAL_HOOK_SLOT"] ?? "") ?? 900
     }
 
-    private static func hookScriptURL() -> URL? {
+    private static func stableHookScriptURL() -> URL? {
+        guard let source = hookScriptSourceURL() else {
+            return nil
+        }
+        let destination = AppSupport.supportDirectory.appendingPathComponent("tmuxpal-hook.sh")
+        do {
+            try AppSupport.ensureSupportDirectory()
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: source, to: destination)
+            makeExecutableIfNeeded(destination)
+            return destination
+        } catch {
+            DebugLog.write("tmux hook script copy failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func hookScriptSourceURL() -> URL? {
         if let bundled = Bundle.main.url(forResource: "tmuxpal-hook", withExtension: "sh") {
             return bundled
         }

@@ -11,6 +11,7 @@ dmg_root="$release_dir/dmg-root"
 
 rm -rf "$release_dir"
 mkdir -p "$release_dir"
+trap 'rm -rf "$dmg_root"' EXIT
 
 TMUXPAL_VERSION="$version" "$repo_dir/Scripts/build_app.sh" >/dev/null
 
