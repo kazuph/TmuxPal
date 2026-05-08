@@ -750,6 +750,10 @@ final class OverlayView: NSView {
     static let bubbleHeight: CGFloat = 76
     static let padding: CGFloat = 14
     static let bubblePalGap: CGFloat = 18
+    static let collapsedBadgeSize: CGFloat = 28
+    static let collapsedBadgeRightOutset: CGFloat = 32
+    static let collapsedBadgeTopOutset: CGFloat = 14
+    static let collapsedBadgeHorizontalAnchor: CGFloat = 0.72
 
     var onDrag: ((_ screenPoint: CGPoint, _ grabOffset: CGPoint, _ horizontalDelta: CGFloat) -> Void)?
     var onClickPane: ((TmuxPane) -> Void)?
@@ -810,7 +814,10 @@ final class OverlayView: NSView {
 
     static func size(forBubbleCount count: Int, collapsed: Bool, palSize: NSSize) -> NSSize {
         if collapsed {
-            return NSSize(width: palSize.width + padding * 2, height: palSize.height + padding * 2)
+            return NSSize(
+                width: palSize.width + padding * 2 + collapsedBadgeRightOutset,
+                height: palSize.height + padding * 2 + collapsedBadgeTopOutset
+            )
         }
         let bubbleStackHeight = Self.bubbleStackHeight(for: count)
         let height = palSize.height + bubbleStackHeight + padding * 2 + bubblePalGap
@@ -1055,10 +1062,10 @@ final class OverlayView: NSView {
     private func drawCollapsedBadge() {
         let count = completedAwaitingCount()
         let pal = palRect()
-        let badgeSize: CGFloat = 28
+        let badgeSize = Self.collapsedBadgeSize
         let rect = NSRect(
-            x: pal.midX + palSize.width * 0.04,
-            y: pal.midY + palSize.height * 0.10,
+            x: pal.minX + palSize.width * Self.collapsedBadgeHorizontalAnchor,
+            y: pal.maxY - badgeSize + Self.collapsedBadgeTopOutset,
             width: badgeSize,
             height: badgeSize
         )
