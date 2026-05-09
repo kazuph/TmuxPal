@@ -835,12 +835,35 @@ final class OverlayView: NSView {
                 height: palSize.height + padding * 2 + collapsedBadgeTopOutset
             )
         }
+        return size(
+            forBubbleCount: count,
+            collapsed: collapsed,
+            palSize: palSize,
+            bubbleVerticalSide: .above
+        )
+    }
+
+    private static func size(
+        forBubbleCount count: Int,
+        collapsed: Bool,
+        palSize: NSSize,
+        bubbleVerticalSide: BubbleVerticalSide
+    ) -> NSSize {
+        if collapsed {
+            return NSSize(
+                width: palSize.width + padding * 2 + collapsedBadgeRightOutset,
+                height: palSize.height + padding * 2 + collapsedBadgeTopOutset
+            )
+        }
         let bubbleStackHeight = Self.bubbleStackHeight(for: count)
+        let transparentTopCompensation = bubbleVerticalSide == .above
+            ? expandedTransparentTopCompensation(for: palSize)
+            : 0
         let height = palSize.height
             + bubbleStackHeight
             + padding * 2
             + bubblePalGap
-            - expandedTransparentTopCompensation(for: palSize)
+            - transparentTopCompensation
         return NSSize(width: bubbleWidth + padding * 2, height: height)
     }
 
@@ -875,7 +898,12 @@ final class OverlayView: NSView {
     }
 
     func preferredSize() -> NSSize {
-        Self.size(forBubbleCount: max(1, min(6, bubbles.count)), collapsed: isCollapsed, palSize: palSize)
+        Self.size(
+            forBubbleCount: max(1, min(6, bubbles.count)),
+            collapsed: isCollapsed,
+            palSize: palSize,
+            bubbleVerticalSide: bubbleVerticalSide
+        )
     }
 
     func updateBubbleLayout(palCenter: CGPoint, visibleFrame: NSRect) {

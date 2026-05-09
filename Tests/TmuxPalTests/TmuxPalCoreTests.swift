@@ -96,7 +96,7 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertEqual(BubbleRunClassifier().classify(bubble), .complete)
     }
 
-    func testClassifiesCopilotActiveTaskAsRunningDespitePromptLine() {
+    func testClassifiesCopilotIdlePromptWithHistoryAsComplete() {
         let transcript = """
         ● Inspect current implementation (shell)
           │ rg -n "sample" Sources Tests
@@ -109,6 +109,25 @@ final class TmuxPalCoreTests: XCTestCase {
         let bubble = PaneBubble(
             pane: makePane(command: "copilot", transcriptTail: transcript, tool: .copilot),
             summary: "sample\nInspect current implementation"
+        )
+
+        XCTAssertEqual(BubbleRunClassifier().classify(bubble), .complete)
+    }
+
+    func testClassifiesCopilotEscToCancelAsRunning() {
+        let transcript = """
+        ● Task complete
+          └ Previous task is done.
+
+        ● Inspecting workflow run (Esc to cancel · 612 B)
+
+        ~/workspace/sample [main]
+        ───────────────────────────────────────
+        ❯
+        """
+        let bubble = PaneBubble(
+            pane: makePane(command: "copilot", transcriptTail: transcript, tool: .copilot),
+            summary: "sample\nInspecting workflow run"
         )
 
         XCTAssertEqual(BubbleRunClassifier().classify(bubble), .running)
