@@ -42,6 +42,8 @@ when installed manually.
 
 ## Build And Run
 
+Build locally from source:
+
 ```bash
 SWIFTPM_DISABLE_SANDBOX=1 swift test --disable-sandbox
 ./Scripts/build_app.sh
@@ -68,6 +70,19 @@ Actions secrets are configured:
 
 Without those secrets, local and CI builds fall back to ad-hoc signing and
 macOS Gatekeeper will block the downloaded app.
+
+For a temporary local install from a non-notarized release, move the app to
+`/Applications`, remove the download quarantine attribute, then ad-hoc sign it
+on your Mac:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/TmuxPal.app
+codesign --force --deep --sign - /Applications/TmuxPal.app
+open /Applications/TmuxPal.app
+```
+
+This only trusts the app on your Mac. Public distribution still requires
+Developer ID signing and notarization.
 
 Create a release by pushing a version tag:
 
