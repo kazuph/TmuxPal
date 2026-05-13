@@ -1006,7 +1006,9 @@ final class OverlayView: NSView {
     static let padding: CGFloat = 14
     static let expandedEdgePadding: CGFloat = 4
     static let bubblePalGap: CGFloat = 8
-    static let expandedTransparentTopCompensationRatio: CGFloat = 0.20
+    // Keep a small amount of transparent-top compensation, but leave enough
+    // clearance that larger jump frames do not collide with the bubble stack.
+    static let expandedTransparentTopCompensationRatio: CGFloat = 0.05
     static let collapsedBadgeSize: CGFloat = 28
     static let collapsedBadgeRightOutset: CGFloat = 32
     static let collapsedBadgeTopOutset: CGFloat = 14
@@ -1024,6 +1026,7 @@ final class OverlayView: NSView {
     private var dragResetTimer: Timer?
     private var isHovering = false
     private var isDragging = false
+    private var pendingBubbleClickPaneId: String?
     private var isCollapsed = ProcessInfo.processInfo.environment["TMUXPAL_COLLAPSED"] == "1"
         || UserDefaults.standard.bool(forKey: "bubblesCollapsed")
     private var animationState = "idle"
@@ -1641,6 +1644,13 @@ final class OverlayView: NSView {
         isHovering = false
         didDrag = false
         let point = convert(event.locationInWindow, from: nil)
+        if let bubble = bubble(at: point) {
+            pendingBubbleClickPaneId = bubble.pane.paneId
+            dragGrabOffset = nil
+            lastDragScreenPoint = nil
+            return
+        }
+        pendingBubbleClickPaneId = nil
         guard palRect().contains(point) else {
             dragGrabOffset = nil
             return
@@ -1665,14 +1675,17 @@ final class OverlayView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        if !didDrag, palRect().contains(point) {
-            toggleCollapsed()
-        } else if !didDrag {
-            for (rect, pane) in bubbleRects where rect.contains(point) && pane.paneId != "%placeholder" {
-                onClickPane?(pane)
-                break
+        if !didDrag {
+            if let bubble = bubble(at: point) {
+                let shouldAcceptClick = pendingBubbleClickPaneId == nil || pendingBubbleClickPaneId == bubble.pane.paneId
+                if shouldAcceptClick {
+                    onClickPane?(bubble.pane)
+                }
+            } else if pendingBubbleClickPaneId == nil, palRect().contains(point) {
+                toggleCollapsed()
             }
         }
+        pendingBubbleClickPaneId = nil
         lastDragScreenPoint = nil
         dragGrabOffset = nil
         isDragging = false
@@ -1704,6 +1717,15 @@ final class OverlayView: NSView {
             return "review"
         }
         return "idle"
+    }
+
+    private func bubble(at point: CGPoint) -> PaneBubble? {
+        guard showsBubbleUI, !isCollapsed else {
+            return nil
+        }
+        return bubbleLayoutRects().first { rect, bubble in
+            rect.contains(point) && bubble.pane.paneId != "%placeholder"
+        }?.1
     }
 }
 
