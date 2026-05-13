@@ -1148,7 +1148,7 @@ final class OverlayView: NSView {
             return NSSize(width: palSize.width + Self.padding * 2, height: palSize.height + Self.padding * 2)
         }
         return Self.size(
-            forBubbleCount: max(1, min(6, bubbles.count)),
+            forBubbleCount: max(1, bubbles.count),
             collapsed: isCollapsed,
             palSize: palSize,
             bubbleVerticalSide: bubbleVerticalSide
@@ -1157,7 +1157,7 @@ final class OverlayView: NSView {
 
     func updateBubbleLayout(palCenter: CGPoint, visibleFrame: NSRect) {
         guard showsBubbleUI, !isCollapsed else { return }
-        let count = max(1, min(6, bubbles.count))
+        let count = max(1, bubbles.count)
         let stackHeight = Self.bubbleStackHeight(for: count)
         let requiredHorizontal = Self.bubbleWidth + Self.padding * 2
         let requiredVertical = stackHeight + Self.padding
@@ -1320,7 +1320,7 @@ final class OverlayView: NSView {
     }
 
     private func bubbleLayoutRects() -> [(NSRect, PaneBubble)] {
-        let visibleBubbles = bubbles.isEmpty ? [placeholderBubble()] : Array(bubbles.prefix(6))
+        let visibleBubbles = bubbles.isEmpty ? [placeholderBubble()] : bubbles
         let count = visibleBubbles.count
         let bubbleHeight = Self.bubbleHeight(for: count)
         let bubbleGap = Self.bubbleGap(for: count)
@@ -1368,7 +1368,7 @@ final class OverlayView: NSView {
         let headline = parts.first ?? bubble.summary
         let detail = parts.count > 1 ? parts[1] : ""
         let location = locationLabel(for: bubble.pane)
-        let bubbleDensity = Self.density(for: max(1, min(6, bubbles.count)))
+        let bubbleDensity = Self.density(for: max(1, bubbles.count))
         drawStatus(in: statusRect, state: runState(for: bubble))
 
         if bubbleDensity == .singleLine {
