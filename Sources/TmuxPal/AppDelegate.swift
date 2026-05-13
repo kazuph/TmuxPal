@@ -56,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(palSelectionMenuItem())
         menu.addItem(palSizeMenuItem())
         menu.addItem(NSMenuItem(title: "デフォルトに戻す", action: #selector(useDefaultPal), keyEquivalent: ""))
+        menu.addItem(screenshotMenuItem())
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "tmux hooks を再インストール", action: #selector(reinstallTmuxHooks), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "tmux hooks を削除", action: #selector(uninstallTmuxHooks), keyEquivalent: ""))
@@ -103,6 +104,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             submenu.addItem(item)
         }
 
+        rootItem.submenu = submenu
+        return rootItem
+    }
+
+    private func screenshotMenuItem() -> NSMenuItem {
+        let rootItem = NSMenuItem(title: "スクリーンショット", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        let modeItem = NSMenuItem(title: "スクショモード", action: #selector(toggleScreenshotMode), keyEquivalent: "")
+        modeItem.state = overlayController?.isScreenshotModeEnabled == true ? .on : .off
+        submenu.addItem(modeItem)
+        submenu.addItem(NSMenuItem(title: "PNG一式を書き出し...", action: #selector(exportScreenshotSet), keyEquivalent: ""))
         rootItem.submenu = submenu
         return rootItem
     }
@@ -169,6 +181,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rebuildStatusMenu()
         } catch {
             DebugLog.write("login item toggle failed: \(error.localizedDescription)")
+        }
+    }
+
+    @objc private func toggleScreenshotMode() {
+        guard let overlayController else { return }
+        overlayController.setScreenshotModeEnabled(!overlayController.isScreenshotModeEnabled)
+        rebuildStatusMenu()
+    }
+
+    @objc private func exportScreenshotSet() {
+        guard let overlayController else { return }
+
+        let panel = NSOpenPanel()
+        panel.title = "スクリーンショット保存先"
+        panel.message = "透過PNGの書き出し先フォルダを選択してください。"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let directory = panel.url else {
+            return
+        }
+
+        let urls = overlayController.exportScreenshotSet(to: directory)
+        rebuildStatusMenu()
+        if !urls.isEmpty {
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
         }
     }
 
@@ -498,6 +538,7 @@ final class OverlayController {
     private var lastLoggedBubbleCount: Int?
     private var isUpdating = false
     private var palAnchorScreenCenter: CGPoint?
+    private var screenshotModeEnabled = false
 
     init() {
         overlayView = OverlayView(palAssetConfig: PalSettings.assetConfig())
@@ -522,6 +563,9 @@ final class OverlayController {
             self?.moveWindow(toScreenPoint: screenPoint, palGrabOffset: palGrabOffset, horizontalDelta: horizontalDelta)
         }
         overlayView.onClickPane = { [weak self] pane in
+            guard self?.screenshotModeEnabled != true else {
+                return
+            }
             do {
                 try self?.collector.focus(pane)
                 DebugLog.write("focused pane=\(pane.sessionName):\(pane.windowIndex).\(pane.paneIndex) \(pane.paneId)")
@@ -556,6 +600,11 @@ final class OverlayController {
     }
 
     func reloadNow() {
+        if screenshotModeEnabled {
+            applyScreenshotModeBubbles()
+            reloadPalAssets()
+            return
+        }
         updatePanes()
         reloadPalAssets()
     }
@@ -571,6 +620,71 @@ final class OverlayController {
         saveFrame()
     }
 
+    var isScreenshotModeEnabled: Bool {
+        screenshotModeEnabled
+    }
+
+    func setScreenshotModeEnabled(_ enabled: Bool) {
+        screenshotModeEnabled = enabled
+        if enabled {
+            applyScreenshotModeBubbles()
+        } else {
+            overlayView.setShowsBubbleUI(true)
+            overlayView.setCollapsed(false, persist: false)
+            updatePanes()
+        }
+    }
+
+    func exportScreenshotSet(to directory: URL) -> [URL] {
+        let originalMode = screenshotModeEnabled
+        let originalSize = PalSettings.displaySize
+        let originalCollapsed = overlayView.collapsedState
+        let originalShowsBubbleUI = overlayView.showsBubbleUI
+        let originalPalCenter = palScreenCenter()
+        let wasVisible = window.isVisible
+        var createdURLs: [URL] = []
+
+        if !wasVisible {
+            show()
+        }
+
+        screenshotModeEnabled = true
+        applyScreenshotModeBubbles()
+
+        defer {
+            overlayView.setShowsBubbleUI(originalShowsBubbleUI)
+            overlayView.setCollapsed(originalCollapsed, persist: false)
+            overlayView.setPalScale(originalSize.scale)
+            fitWindow(keepingPalCenter: originalPalCenter)
+            screenshotModeEnabled = originalMode
+            if originalMode {
+                applyScreenshotModeBubbles()
+            } else {
+                updatePanes()
+            }
+            if !wasVisible {
+                window.orderOut(nil)
+            }
+        }
+
+        let palName = sanitizedFileComponent(PalSettings.selectedPalDirectory?.lastPathComponent ?? "default")
+        for size in PalDisplaySize.allCases {
+            overlayView.setPalScale(size.scale)
+            for variant in ScreenshotCaptureVariant.allCases {
+                overlayView.setShowsBubbleUI(variant.showsBubbleUI)
+                overlayView.setCollapsed(false, persist: false)
+                fitWindow(keepingPalCenter: originalPalCenter)
+                window.displayIfNeeded()
+                let url = directory.appendingPathComponent("tmuxpal-\(palName)-\(size.rawValue)-\(variant.fileSuffix).png")
+                overlayView.writeSnapshot(to: url)
+                createdURLs.append(url)
+            }
+        }
+
+        DebugLog.write("exported screenshot set count=\(createdURLs.count) dir=\(directory.path)")
+        return createdURLs
+    }
+
     private func startTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
@@ -582,6 +696,10 @@ final class OverlayController {
     }
 
     private func updatePanes() {
+        if screenshotModeEnabled {
+            applyScreenshotModeBubbles()
+            return
+        }
         guard !isUpdating else { return }
         isUpdating = true
         let collector = collector
@@ -608,11 +726,21 @@ final class OverlayController {
             }.value
 
             isUpdating = false
+            if screenshotModeEnabled {
+                applyScreenshotModeBubbles()
+                return
+            }
             if let error = result.error {
                 DebugLog.write("tmux collect failed: \(error)")
             }
             applyBubbles(result.bubbles, paneCount: result.paneCount)
         }
+    }
+
+    private func applyScreenshotModeBubbles() {
+        let bubbles = Self.screenshotModeBubbles()
+        overlayView.setShowsBubbleUI(true)
+        applyBubbles(bubbles, paneCount: bubbles.count)
     }
 
     private func applyBubbles(_ bubbles: [PaneBubble], paneCount: Int) {
@@ -731,6 +859,120 @@ final class OverlayController {
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         return NSRect(x: screen.minX + 72, y: screen.maxY - 260, width: 408, height: 220)
     }
+
+    private func sanitizedFileComponent(_ text: String) -> String {
+        let lowered = text.lowercased()
+        let scalars = lowered.unicodeScalars.map { scalar -> Character in
+            if CharacterSet.alphanumerics.contains(scalar) {
+                return Character(scalar)
+            }
+            return "-"
+        }
+        let joined = String(scalars)
+        let collapsed = joined.replacingOccurrences(of: "-+", with: "-", options: .regularExpression)
+        let trimmed = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return trimmed.isEmpty ? "default" : trimmed
+    }
+
+    private static func screenshotModeBubbles() -> [PaneBubble] {
+        [
+            screenshotBubble(
+                paneId: "%s1",
+                windowIndex: "1",
+                paneIndex: "1",
+                tool: .codex,
+                active: true,
+                title: "TmuxPal",
+                detail: "Track multiple coding AI panes",
+                transcriptTail: "● Working (43s · esc to interrupt)"
+            ),
+            screenshotBubble(
+                paneId: "%s2",
+                windowIndex: "1",
+                paneIndex: "2",
+                tool: .claude,
+                active: false,
+                title: "Swift / AppKit",
+                detail: "Menu bar overlay for tmux",
+                transcriptTail: "Task complete"
+            ),
+            screenshotBubble(
+                paneId: "%s3",
+                windowIndex: "2",
+                paneIndex: "1",
+                tool: .copilot,
+                active: false,
+                title: "Screenshot mode",
+                detail: "Safe demo bubbles for sharing",
+                transcriptTail: "Task complete"
+            ),
+            screenshotBubble(
+                paneId: "%s4",
+                windowIndex: "2",
+                paneIndex: "2",
+                tool: .opencode,
+                active: false,
+                title: "Transparent PNG",
+                detail: "Ready for blog posts and releases",
+                transcriptTail: "Task complete"
+            )
+        ]
+    }
+
+    private static func screenshotBubble(
+        paneId: String,
+        windowIndex: String,
+        paneIndex: String,
+        tool: AiTool,
+        active: Bool,
+        title: String,
+        detail: String,
+        transcriptTail: String
+    ) -> PaneBubble {
+        let pane = TmuxPane(
+            sessionName: "0",
+            windowIndex: windowIndex,
+            windowId: "@\(windowIndex)",
+            windowName: "tmuxpal",
+            paneIndex: paneIndex,
+            paneId: paneId,
+            panePid: "0",
+            paneTty: "",
+            currentCommand: tool.rawValue,
+            currentPath: "/tmp/tmuxpal",
+            active: active,
+            title: title,
+            commandLine: tool.rawValue,
+            transcriptExcerpt: transcriptTail,
+            transcriptTail: transcriptTail,
+            tool: tool,
+            status: active ? .selected : .idle
+        )
+        return PaneBubble(pane: pane, summary: "\(title)\n\(detail)")
+    }
+}
+
+private enum ScreenshotCaptureVariant: CaseIterable {
+    case bubbles
+    case palOnly
+
+    var fileSuffix: String {
+        switch self {
+        case .bubbles:
+            return "bubbles"
+        case .palOnly:
+            return "pal-only"
+        }
+    }
+
+    var showsBubbleUI: Bool {
+        switch self {
+        case .bubbles:
+            return true
+        case .palOnly:
+            return false
+        }
+    }
 }
 
 final class OverlayPanel: NSPanel {
@@ -796,6 +1038,7 @@ final class OverlayView: NSView {
     private var completedBubbleCount = 0
     private var bubbleHorizontalSide: BubbleHorizontalSide = .left
     private var bubbleVerticalSide: BubbleVerticalSide = .above
+    private(set) var showsBubbleUI = true
 
     init(frame frameRect: NSRect = .zero, palAssetConfig: PalAssetConfig) {
         self.palAssetConfig = palAssetConfig
@@ -898,7 +1141,10 @@ final class OverlayView: NSView {
     }
 
     func preferredSize() -> NSSize {
-        Self.size(
+        if !showsBubbleUI {
+            return NSSize(width: palSize.width + Self.padding * 2, height: palSize.height + Self.padding * 2)
+        }
+        return Self.size(
             forBubbleCount: max(1, min(6, bubbles.count)),
             collapsed: isCollapsed,
             palSize: palSize,
@@ -907,7 +1153,7 @@ final class OverlayView: NSView {
     }
 
     func updateBubbleLayout(palCenter: CGPoint, visibleFrame: NSRect) {
-        guard !isCollapsed else { return }
+        guard showsBubbleUI, !isCollapsed else { return }
         let count = max(1, min(6, bubbles.count))
         let stackHeight = Self.bubbleStackHeight(for: count)
         let requiredHorizontal = Self.bubbleWidth + Self.padding * 2
@@ -947,6 +1193,27 @@ final class OverlayView: NSView {
     func setPalScale(_ scale: CGFloat) {
         palScale = scale
         needsDisplay = true
+    }
+
+    var collapsedState: Bool {
+        isCollapsed
+    }
+
+    func setCollapsed(_ collapsed: Bool, persist: Bool) {
+        isCollapsed = collapsed
+        if persist {
+            UserDefaults.standard.set(isCollapsed, forKey: "bubblesCollapsed")
+        }
+        bubbleRects.removeAll()
+        needsDisplay = true
+        onCollapseChanged?()
+    }
+
+    func setShowsBubbleUI(_ showsBubbleUI: Bool) {
+        self.showsBubbleUI = showsBubbleUI
+        bubbleRects.removeAll()
+        needsDisplay = true
+        onCollapseChanged?()
     }
 
     func setBubbles(_ bubbles: [PaneBubble]) {
@@ -1003,6 +1270,9 @@ final class OverlayView: NSView {
         super.draw(dirtyRect)
         if dirtyRect.intersects(palRect()) {
             drawPal()
+        }
+        if !showsBubbleUI {
+            return
         }
         if isCollapsed {
             if dirtyRect.intersects(collapsedBadgeRect()) {
@@ -1287,6 +1557,9 @@ final class OverlayView: NSView {
 
     private func palRect(in bounds: NSRect) -> NSRect {
         let size = palSize
+        if !showsBubbleUI {
+            return NSRect(x: Self.padding, y: Self.padding, width: size.width, height: size.height)
+        }
         if isCollapsed {
             return NSRect(x: Self.padding, y: Self.padding, width: size.width, height: size.height)
         }

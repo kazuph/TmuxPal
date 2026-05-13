@@ -195,12 +195,38 @@ final class TmuxPalCoreTests: XCTestCase {
             "list-panes": row,
             "capture-pane": "● Execute generated command (shell)\n  └ running...\n"
         ])
-        let collector = TmuxCollector(tmuxPath: "tmux", tmuxSocketPath: "/tmp/test", runner: runner, transcriptCacheTTL: 0)
+        let collector = TmuxCollector(
+            tmuxPath: "tmux",
+            tmuxSocketPath: "/tmp/test",
+            runner: runner,
+            transcriptCacheTTL: 0,
+            activeTranscriptCacheTTL: 0
+        )
 
         _ = try collector.collect()
         _ = try collector.collect()
 
         XCTAssertEqual(runner.commands.filter { $0.contains("capture-pane") }.count, 2)
+    }
+
+    func testCollectReusesTranscriptForInactivePanesWithinCacheTTL() throws {
+        let row = tmuxRow(command: "copilot", title: "Sample task", active: false)
+        let runner = RecordingRunner(outputs: [
+            "list-panes": row,
+            "capture-pane": "● Execute generated command (shell)\n  └ running...\n"
+        ])
+        let collector = TmuxCollector(
+            tmuxPath: "tmux",
+            tmuxSocketPath: "/tmp/test",
+            runner: runner,
+            transcriptCacheTTL: 60,
+            activeTranscriptCacheTTL: 0
+        )
+
+        _ = try collector.collect()
+        _ = try collector.collect()
+
+        XCTAssertEqual(runner.commands.filter { $0.contains("capture-pane") }.count, 1)
     }
 
     func testBadgeCountsCompletedAwaitingBubbles() {
@@ -324,7 +350,7 @@ final class TmuxPalCoreTests: XCTestCase {
         )
     }
 
-    private func tmuxRow(command: String, title: String) -> String {
+    private func tmuxRow(command: String, title: String, active: Bool = false) -> String {
         [
             "0",
             "1",
@@ -336,7 +362,7 @@ final class TmuxPalCoreTests: XCTestCase {
             "/dev/ttys001",
             command,
             "/workspace/sample-agent",
-            "0",
+            active ? "1" : "0",
             title
         ].joined(separator: TmuxCollector.fieldSeparator)
     }

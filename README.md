@@ -21,6 +21,9 @@ Copilot CLI, and opencode, then shows Dokochan with stacked status bubbles.
   `pal.json`.
 - Select pal size from the menu bar. The current display size is `Small`; `Medium`
   and `Large` scale the pal while preserving its screen position.
+- Screenshot mode is available from the menu bar. It swaps in sanitized demo
+  bubbles and can export a transparent PNG set with bubbles and pal-only
+  variants for `Small`, `Medium`, and `Large`.
 - Toggle "Launch at Login" from the menu bar.
 - tmux hooks append lifecycle events to:
   `~/Library/Application Support/tmuxpal/events.jsonl`.

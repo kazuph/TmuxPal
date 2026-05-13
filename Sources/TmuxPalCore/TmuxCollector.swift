@@ -69,19 +69,24 @@ public struct TmuxCollector: Sendable {
     private let runner: CommandRunning
     private let detector: AiPaneDetector
     private let transcriptCache: LockedTranscriptCache
+    private let inactiveTranscriptCacheTTL: TimeInterval
+    private let activeTranscriptCacheTTL: TimeInterval
 
     public init(
         tmuxPath: String = "/opt/homebrew/bin/tmux",
         tmuxSocketPath: String? = nil,
         runner: CommandRunning = ProcessCommandRunner(),
         detector: AiPaneDetector = AiPaneDetector(),
-        transcriptCacheTTL: TimeInterval = 1.5
+        transcriptCacheTTL: TimeInterval = 12,
+        activeTranscriptCacheTTL: TimeInterval = 4.5
     ) {
         self.tmuxPath = tmuxPath
         self.tmuxSocketPath = tmuxSocketPath ?? Self.defaultSocketPath()
         self.runner = runner
         self.detector = detector
-        self.transcriptCache = LockedTranscriptCache(transcriptTTL: transcriptCacheTTL)
+        self.inactiveTranscriptCacheTTL = transcriptCacheTTL
+        self.activeTranscriptCacheTTL = activeTranscriptCacheTTL
+        self.transcriptCache = LockedTranscriptCache()
     }
 
     public func collect() throws -> [TmuxPane] {
@@ -214,7 +219,8 @@ public struct TmuxCollector: Sendable {
             pane.windowName,
             pane.active ? "1" : "0"
         ].joined(separator: "|")
-        if let cached = transcriptCache.transcript(for: pane.paneId, signature: signature) {
+        let maxAge = pane.active ? activeTranscriptCacheTTL : inactiveTranscriptCacheTTL
+        if let cached = transcriptCache.transcript(for: pane.paneId, signature: signature, maxAge: maxAge) {
             return cached
         }
         let transcript = captureTranscript(for: pane.paneId)
@@ -338,19 +344,14 @@ private final class LockedTranscriptCache: @unchecked Sendable {
     private let lock = NSLock()
     private var transcripts: [String: TranscriptEntry] = [:]
     private var processCommandLines: [String: StringEntry] = [:]
-    private let transcriptTTL: TimeInterval
     private let processCommandLineTTL: TimeInterval = 30
 
-    init(transcriptTTL: TimeInterval) {
-        self.transcriptTTL = transcriptTTL
-    }
-
-    func transcript(for paneId: String, signature: String) -> (excerpt: String, tail: String)? {
+    func transcript(for paneId: String, signature: String, maxAge: TimeInterval) -> (excerpt: String, tail: String)? {
         lock.lock()
         defer { lock.unlock() }
         guard let entry = transcripts[paneId],
               entry.signature == signature,
-              Date().timeIntervalSince(entry.createdAt) < transcriptTTL else {
+              Date().timeIntervalSince(entry.createdAt) < maxAge else {
             return nil
         }
         return (entry.excerpt, entry.tail)
