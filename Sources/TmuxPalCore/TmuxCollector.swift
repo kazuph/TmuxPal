@@ -63,6 +63,7 @@ public struct TmuxClient: Equatable, Sendable {
 
 public struct TmuxCollector: Sendable {
     public static let fieldSeparator = "|#|"
+    public static let herdrSessionName = "herdr"
 
     private let tmuxPath: String
     private let tmuxSocketPath: String?
@@ -105,18 +106,106 @@ public struct TmuxCollector: Sendable {
             "#{pane_title}"
         ].joined(separator: Self.fieldSeparator)
 
-        let output = try runTmux(["list-panes", "-a", "-F", format])
-        return output
-            .split(separator: "\n", omittingEmptySubsequences: true)
-            .compactMap { line in
-                let text = String(line)
-                let pane = parseLine(text) ?? parseLine(text, commandLineOverride: cachedProcessCommandLine(forTmuxLine: text))
-                if let pane {
-                    let transcript = cachedTranscript(for: pane)
-                    return pane.withTranscript(excerpt: transcript.excerpt, tail: transcript.tail)
+        var tmuxError: Error?
+        let tmuxPanes: [TmuxPane]
+        do {
+            let output = try runTmux(["list-panes", "-a", "-F", format])
+            tmuxPanes = output
+                .split(separator: "\n", omittingEmptySubsequences: true)
+                .compactMap { line in
+                    let text = String(line)
+                    let pane = parseLine(text) ?? parseLine(text, commandLineOverride: cachedProcessCommandLine(forTmuxLine: text))
+                    if let pane {
+                        let transcript = cachedTranscript(for: pane)
+                        return pane.withTranscript(excerpt: transcript.excerpt, tail: transcript.tail)
+                    }
+                    return nil
                 }
+        } catch {
+            tmuxError = error
+            tmuxPanes = []
+        }
+
+        let herdrPanes = collectHerdrPanes()
+        if tmuxPanes.isEmpty, herdrPanes.isEmpty, let tmuxError {
+            throw tmuxError
+        }
+        return tmuxPanes + herdrPanes
+    }
+
+    public func parseHerdrAgentList(_ output: String, observedAt: Date = Date()) -> [TmuxPane] {
+        guard let data = output.data(using: .utf8),
+              let response = try? JSONDecoder().decode(HerdrAgentListResponse.self, from: data) else {
+            return []
+        }
+        return response.result.agents.compactMap { agent in
+            herdrPane(from: agent, observedAt: observedAt)
+        }
+    }
+
+    public func parseHerdrPaneList(_ output: String, observedAt: Date = Date()) -> [TmuxPane] {
+        guard let data = output.data(using: .utf8),
+              let response = try? JSONDecoder().decode(HerdrPaneListResponse.self, from: data) else {
+            return []
+        }
+        return response.result.panes.compactMap { pane in
+            guard pane.agent != nil else {
                 return nil
             }
+            return herdrPane(from: pane, observedAt: observedAt)
+        }
+    }
+
+    private func collectHerdrPanes() -> [TmuxPane] {
+        let output: String
+        do {
+            output = try runHerdr(["agent", "list"])
+        } catch {
+            return []
+        }
+        return parseHerdrAgentList(output).map { pane in
+            let transcript = cachedTranscript(for: pane)
+            return pane.withTranscript(excerpt: transcript.excerpt, tail: transcript.tail)
+        }
+    }
+
+    private func herdrPane(from pane: HerdrPaneSnapshot, observedAt: Date) -> TmuxPane? {
+        let agent = pane.agent ?? ""
+        guard let tool = detector.detect(command: agent, title: "", commandLine: agent) else {
+            return nil
+        }
+        return TmuxPane(
+            sessionName: Self.herdrSessionName,
+            windowIndex: pane.workspaceId,
+            windowId: pane.tabId,
+            windowName: pane.workspaceId,
+            paneIndex: pane.paneId,
+            paneId: pane.paneId,
+            panePid: "",
+            paneTty: "",
+            currentCommand: agent,
+            currentPath: pane.cwd,
+            active: pane.focused,
+            title: pane.agentStatus,
+            commandLine: agent,
+            tool: tool,
+            status: herdrStatus(pane.agentStatus, focused: pane.focused),
+            observedAt: observedAt
+        )
+    }
+
+    private func herdrStatus(_ status: String, focused: Bool) -> PaneStatus {
+        if focused {
+            return .selected
+        }
+        switch status {
+        case "idle":
+            return .idle
+        case "working", "blocked", "unknown":
+            return .running
+        default:
+            return .running
+        }
     }
 
     public func parseListPanes(_ output: String, observedAt: Date = Date()) -> [TmuxPane] {
@@ -206,6 +295,9 @@ public struct TmuxCollector: Sendable {
     }
 
     private func captureTranscript(for paneId: String) -> String {
+        if isHerdrPaneId(paneId) {
+            return (try? runHerdr(["agent", "read", paneId, "--source", "recent-unwrapped", "--lines", "16", "--format", "text"])) ?? ""
+        }
         guard let output = try? runTmux(["capture-pane", "-p", "-J", "-t", paneId, "-S", "-16"]) else {
             return ""
         }
@@ -266,6 +358,10 @@ public struct TmuxCollector: Sendable {
     }
 
     public func focus(_ pane: TmuxPane) throws {
+        if isHerdrPaneId(pane.paneId) || pane.sessionName == Self.herdrSessionName {
+            _ = try runHerdr(["agent", "focus", pane.paneId])
+            return
+        }
         let target = "\(pane.sessionName):\(pane.windowIndex).\(pane.paneIndex)"
         if let client = try preferredClient(for: pane) {
             _ = try runTmux(["switch-client", "-c", client.name, "-t", target])
@@ -314,6 +410,14 @@ public struct TmuxCollector: Sendable {
         return try runner.run(tmuxPath, arguments)
     }
 
+    private func runHerdr(_ arguments: [String]) throws -> String {
+        try runner.run("/usr/bin/env", ["herdr"] + arguments)
+    }
+
+    private func isHerdrPaneId(_ paneId: String) -> Bool {
+        paneId.hasPrefix("w") && paneId.contains("-")
+    }
+
     private static func defaultSocketPath() -> String? {
         if let explicit = ProcessInfo.processInfo.environment["TMUXPAL_TMUX_SOCKET"], !explicit.isEmpty {
             return explicit
@@ -324,6 +428,42 @@ public struct TmuxCollector: Sendable {
             return path
         }
         return nil
+    }
+}
+
+private struct HerdrAgentListResponse: Decodable {
+    let result: Result
+
+    struct Result: Decodable {
+        let agents: [HerdrPaneSnapshot]
+    }
+}
+
+private struct HerdrPaneListResponse: Decodable {
+    let result: Result
+
+    struct Result: Decodable {
+        let panes: [HerdrPaneSnapshot]
+    }
+}
+
+private struct HerdrPaneSnapshot: Decodable {
+    let agent: String?
+    let agentStatus: String
+    let cwd: String
+    let focused: Bool
+    let paneId: String
+    let tabId: String
+    let workspaceId: String
+
+    private enum CodingKeys: String, CodingKey {
+        case agent
+        case agentStatus = "agent_status"
+        case cwd
+        case focused
+        case paneId = "pane_id"
+        case tabId = "tab_id"
+        case workspaceId = "workspace_id"
     }
 }
 

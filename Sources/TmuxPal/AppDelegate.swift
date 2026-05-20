@@ -572,7 +572,7 @@ final class OverlayController {
             } catch {
                 DebugLog.write("focus failed pane=\(pane.paneId): \(error.localizedDescription)")
             }
-            TerminalActivator.activatePreferredTerminal()
+            TerminalActivator.activatePreferredTerminal(for: pane)
         }
         overlayView.onCollapseChanged = { [weak self] in
             self?.fitWindow()
@@ -1730,7 +1730,7 @@ final class OverlayView: NSView {
 }
 
 enum TerminalActivator {
-    static func activatePreferredTerminal() {
+    static func activatePreferredTerminal(for pane: TmuxPane? = nil) {
         let candidates = NSWorkspace.shared.runningApplications.filter { app in
             let name = app.localizedName?.lowercased() ?? ""
             let bundleId = app.bundleIdentifier?.lowercased() ?? ""
@@ -1753,15 +1753,72 @@ enum TerminalActivator {
             let name = preferred.localizedName?.lowercased() ?? ""
             let bundleId = preferred.bundleIdentifier?.lowercased() ?? ""
             if name.contains("ghostty") || bundleId.contains("ghostty") {
-                activateGhosttyByAppleScript()
+                activateGhosttyByAppleScript(tabPrefix: ghosttyTabPrefix(for: pane))
             }
         }
     }
 
-    private static func activateGhosttyByAppleScript() {
+    private static func ghosttyTabPrefix(for pane: TmuxPane?) -> String? {
+        guard let pane else {
+            return nil
+        }
+        return pane.sessionName == TmuxCollector.herdrSessionName ? "herdr" : "tmux"
+    }
+
+    private static func activateGhosttyByAppleScript(tabPrefix: String?) {
         var error: NSDictionary?
-        NSAppleScript(source: #"tell application "Ghostty" to activate"#)?
-            .executeAndReturnError(&error)
+        let script: String
+        if let tabPrefix {
+            script = """
+            tell application "Ghostty" to activate
+            tell application "Ghostty"
+                repeat with ghosttyWindow in windows
+                    repeat with ghosttyTab in tabs of ghosttyWindow
+                        if name of ghosttyTab starts with "\(tabPrefix)" then
+                            select tab ghosttyTab
+                            activate window ghosttyWindow
+                            return true
+                        end if
+                    end repeat
+                end repeat
+            end tell
+            return false
+            """
+        } else {
+            script = #"tell application "Ghostty" to activate"#
+        }
+        if runOsaScript(script) {
+            return
+        }
+        NSAppleScript(source: script)?.executeAndReturnError(&error)
+        if let error {
+            DebugLog.write("ghostty tab activation failed: \(error)")
+        }
+    }
+
+    private static func runOsaScript(_ script: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = script
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .flatMap { ["-e", String($0)] }
+        process.standardOutput = Pipe()
+        let error = Pipe()
+        process.standardError = error
+        do {
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus == 0 {
+                return true
+            }
+            let data = error.fileHandleForReading.readDataToEndOfFile()
+            let message = String(data: data, encoding: .utf8) ?? "osascript failed"
+            DebugLog.write("ghostty tab osascript failed: \(message.trimmingCharacters(in: .whitespacesAndNewlines))")
+            return false
+        } catch {
+            DebugLog.write("ghostty tab osascript failed: \(error.localizedDescription)")
+            return false
+        }
     }
 }
 

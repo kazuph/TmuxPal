@@ -37,6 +37,33 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertEqual(pane?.tool, .codex)
     }
 
+    func testDetectsHerdrCodexAgents() throws {
+        let output = """
+        {"id":"cli:agent:list","result":{"agents":[{"agent":"codex","agent_status":"working","cwd":"/workspace/tmuxpal","focused":true,"pane_id":"w6523c5b0eb8895-1","revision":0,"tab_id":"w6523c5b0eb8895:1","terminal_id":"term_6523c5b0eb885a","workspace_id":"w6523c5b0eb8895"}],"type":"agent_list"}}
+        """
+
+        let panes = TmuxCollector().parseHerdrAgentList(output)
+
+        let pane = try XCTUnwrap(panes.first)
+        XCTAssertEqual(pane.tool, .codex)
+        XCTAssertEqual(pane.sessionName, TmuxCollector.herdrSessionName)
+        XCTAssertEqual(pane.paneId, "w6523c5b0eb8895-1")
+        XCTAssertEqual(pane.currentPath, "/workspace/tmuxpal")
+        XCTAssertEqual(pane.status, .selected)
+    }
+
+    func testHerdrPaneListIgnoresNonAgentPanes() {
+        let output = """
+        {"id":"cli:pane:list","result":{"panes":[{"agent":"codex","agent_status":"idle","cwd":"/workspace/agent","focused":false,"pane_id":"w1-1","revision":0,"tab_id":"w1:1","terminal_id":"term_1","workspace_id":"w1"},{"agent_status":"unknown","cwd":"/workspace/shell","focused":false,"pane_id":"w1-2","revision":0,"tab_id":"w1:1","terminal_id":"term_2","workspace_id":"w1"}],"type":"pane_list"}}
+        """
+
+        let panes = TmuxCollector().parseHerdrPaneList(output)
+
+        XCTAssertEqual(panes.count, 1)
+        XCTAssertEqual(panes[0].paneId, "w1-1")
+        XCTAssertEqual(panes[0].status, .idle)
+    }
+
     func testSummarizesActiveAndTitledPanes() throws {
         let fixture = try String(contentsOfFile: fixturePath("list-panes.txt"), encoding: .utf8)
         let panes = TmuxCollector().parseListPanes(fixture)
@@ -283,6 +310,22 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertTrue(runner.commands.contains { $0.suffix(5) == ["switch-client", "-c", "/dev/ttys000", "-t", "other-session:1.1"] })
         XCTAssertTrue(runner.commands.contains { $0.suffix(3) == ["select-pane", "-t", "%93"] })
         XCTAssertFalse(runner.commands.contains { $0.contains("select-window") })
+    }
+
+    func testFocusUsesHerdrForHerdrPane() throws {
+        let runner = RecordingRunner(outputs: [:])
+        let collector = TmuxCollector(tmuxPath: "tmux", tmuxSocketPath: "/tmp/test", runner: runner)
+        let pane = makePane(
+            sessionName: TmuxCollector.herdrSessionName,
+            paneId: "w6523c5b0eb8895-1",
+            command: "codex",
+            transcriptTail: ""
+        )
+
+        try collector.focus(pane)
+
+        XCTAssertTrue(runner.commands.contains(["herdr", "agent", "focus", "w6523c5b0eb8895-1"]))
+        XCTAssertFalse(runner.commands.contains { $0.contains("select-pane") })
     }
 
     func testCollectDoesNotInspectPlainShellPaneProcessList() throws {
