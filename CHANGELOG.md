@@ -10,6 +10,10 @@ TmuxPal v0.9.1 polishes the repository for public distribution.
   pal assets, and Codex usage-ring behavior.
 - Documented the current ad-hoc signing fallback, local launch workaround, and
   Developer ID notarization requirements for public artifacts.
+- Added CLI helpers for creating a Developer ID CSR and storing release signing
+  secrets in GitHub Actions.
+- Made tag releases fail when Developer ID signing inputs are missing instead
+  of publishing ad-hoc signed public artifacts.
 - Replaced the app icon with a simpler public-facing icon that keeps Dokochan,
   tmux panes, and green usage rings visible at small sizes.
 - Added GitHub repository description, homepage, and topics.

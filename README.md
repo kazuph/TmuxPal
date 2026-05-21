@@ -67,6 +67,48 @@ open /Applications/TmuxPal.app
 This only makes your local copy launchable. It is not a substitute for Developer
 ID signing and notarization for public distribution.
 
+## CLI Signing Setup
+
+TmuxPal can be set up for Developer ID signing mostly from the CLI. Two Apple
+account steps still happen outside this repository: creating the Developer ID
+certificate from the uploaded CSR, and creating an Apple app-specific password
+for notarization.
+
+Create a certificate signing request and private key:
+
+```bash
+./Scripts/create-developer-id-csr.sh
+```
+
+Upload the generated `.certSigningRequest` file to Apple Developer, create a
+`Developer ID Application` certificate, and download the resulting `.cer` file.
+Then store the GitHub Actions secrets:
+
+```bash
+./Scripts/setup-release-signing.sh \
+  --certificate /path/to/developerID_application.cer \
+  --private-key ./dist/signing/DeveloperIDApplication.key
+```
+
+If you already exported a `.p12` from Keychain Access, you can use that instead:
+
+```bash
+./Scripts/setup-release-signing.sh --p12 /path/to/DeveloperIDApplication.p12
+```
+
+The setup script stores:
+
+- `APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`
+- `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`
+- `CODESIGN_IDENTITY`
+- `APPLE_ID`
+- `APPLE_TEAM_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `KEYCHAIN_PASSWORD` (optional)
+
+Tag releases require those signing inputs. If they are missing, GitHub Actions
+fails instead of publishing ad-hoc signed public artifacts.
+
 ## Build From Source
 
 ```bash

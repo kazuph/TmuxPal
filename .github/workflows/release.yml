@@ -19,6 +19,30 @@ jobs:
       - name: Test
         run: SWIFTPM_DISABLE_SANDBOX=1 swift test --disable-sandbox
 
+      - name: Require Developer ID signing for tag releases
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "${APPLE_DEVELOPER_ID_CERTIFICATE_BASE64:-}" ]] || missing+=("APPLE_DEVELOPER_ID_CERTIFICATE_BASE64")
+          [[ -n "${APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD:-}" ]] || missing+=("APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD")
+          [[ -n "${CODESIGN_IDENTITY:-}" ]] || missing+=("CODESIGN_IDENTITY")
+          [[ -n "${APPLE_ID:-}" ]] || missing+=("APPLE_ID")
+          [[ -n "${APPLE_TEAM_ID:-}" ]] || missing+=("APPLE_TEAM_ID")
+          [[ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]] || missing+=("APPLE_APP_SPECIFIC_PASSWORD")
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing secrets for signed public release: %s\n' "${missing[*]}" >&2
+            echo "Run ./Scripts/setup-release-signing.sh before pushing a release tag." >&2
+            exit 1
+          fi
+
       - name: Import Developer ID certificate
         env:
           APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
@@ -50,6 +74,9 @@ jobs:
           if [[ -z "${CODESIGN_IDENTITY:-}" ]]; then
             CODESIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ { print $2; exit }')"
             export CODESIGN_IDENTITY
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+            export TMUXPAL_REQUIRE_NOTARIZATION=1
           fi
           ./Scripts/package_release.sh "${GITHUB_REF_NAME:-manual}"
         env:

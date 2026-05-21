@@ -20,6 +20,18 @@ zip_path="$release_dir/TmuxPal-${version}.zip"
 dmg_path="$release_dir/TmuxPal-${version}.dmg"
 checksum_path="$release_dir/checksums.txt"
 
+if [[ "${TMUXPAL_REQUIRE_NOTARIZATION:-}" == "1" ]]; then
+  missing=()
+  [[ -n "${APPLE_ID:-}" ]] || missing+=("APPLE_ID")
+  [[ -n "${APPLE_TEAM_ID:-}" ]] || missing+=("APPLE_TEAM_ID")
+  [[ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]] || missing+=("APPLE_APP_SPECIFIC_PASSWORD")
+  [[ -n "${CODESIGN_IDENTITY:-}" ]] || missing+=("CODESIGN_IDENTITY")
+  if (( ${#missing[@]} > 0 )); then
+    printf 'Missing signing inputs for public release: %s\n' "${missing[*]}" >&2
+    exit 1
+  fi
+fi
+
 if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${CODESIGN_IDENTITY:-}" ]]; then
   ditto -c -k --keepParent "$app_path" "$notary_zip_path"
   xcrun notarytool submit "$notary_zip_path" \
