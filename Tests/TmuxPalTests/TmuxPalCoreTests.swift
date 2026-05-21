@@ -68,15 +68,31 @@ final class TmuxPalCoreTests: XCTestCase {
         let payload = """
         {
           "rate_limit": {
-            "primary_window": {"used_percent": 37, "limit_window_seconds": 604800},
-            "secondary_window": {"used_percent": 12, "limit_window_seconds": 2592000}
+            "primary_window": {"used_percent": 37, "limit_window_seconds": 604800, "reset_at": 3600},
+            "secondary_window": {"used_percent": 12, "limit_window_seconds": 2592000, "reset_at": 7200}
           }
         }
         """.data(using: .utf8)!
 
-        let snapshot = try XCTUnwrap(CodexUsageParser.snapshot(from: payload))
+        let snapshot = try XCTUnwrap(CodexUsageParser.snapshot(from: payload, observedAt: Date(timeIntervalSince1970: 0)))
         XCTAssertEqual(snapshot.weekly?.remainingPercent, 63)
         XCTAssertEqual(snapshot.monthly?.remainingPercent, 88)
+        let weekly = try XCTUnwrap(snapshot.weekly)
+        let weeklyPace = try XCTUnwrap(weekly.paceRemainingPercent(at: snapshot.observedAt))
+        XCTAssertEqual(weeklyPace, 3600.0 / 604800.0 * 100.0, accuracy: 0.0001)
+    }
+
+    func testUsagePaceRemainingPercentMovesFromFullToEmptyByReset() {
+        let bucket = CodexUsageBucket(
+            label: "5h",
+            usedPercent: 25,
+            windowSeconds: 5 * 60 * 60,
+            resetAt: 10_000 + 2.5 * 60 * 60
+        )
+
+        XCTAssertEqual(bucket.paceRemainingPercent(at: Date(timeIntervalSince1970: 10_000)), 50)
+        XCTAssertEqual(bucket.paceRemainingPercent(at: Date(timeIntervalSince1970: 1_000)), 100)
+        XCTAssertEqual(bucket.paceRemainingPercent(at: Date(timeIntervalSince1970: 20_000)), 0)
     }
 
     func testExtractsTextFromHerdrAgentReadJsonEnvelope() {

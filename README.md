@@ -184,7 +184,10 @@ and the inner ring is a brighter version. The outer ring is monthly and the
 inner ring is weekly when the ChatGPT usage endpoint exposes a monthly bucket.
 When monthly is not available, TmuxPal uses weekly outside and the short-window
 bucket inside so the ambient two-ring shape still works without inventing a
-monthly value.
+monthly value. Each visible ring also draws a small pace marker based on the
+bucket reset time and window length. If the ring endpoint passes the marker, the
+current usage is ahead of the even-spend pace; if the marker passes the endpoint,
+usage is behind that pace.
 
 ## License
 

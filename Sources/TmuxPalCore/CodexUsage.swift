@@ -9,6 +9,15 @@ public struct CodexUsageBucket: Equatable, Sendable {
     public var remainingPercent: Double {
         min(max(100.0 - usedPercent, 0.0), 100.0)
     }
+
+    public func paceRemainingPercent(at observedAt: Date) -> Double? {
+        guard let windowSeconds, windowSeconds > 0, let resetAt else {
+            return nil
+        }
+        let normalizedResetAt = resetAt > 10_000_000_000 ? resetAt / 1000.0 : resetAt
+        let secondsLeft = normalizedResetAt - observedAt.timeIntervalSince1970
+        return min(max(secondsLeft / windowSeconds * 100.0, 0.0), 100.0)
+    }
 }
 
 public struct CodexUsageSnapshot: Equatable, Sendable {

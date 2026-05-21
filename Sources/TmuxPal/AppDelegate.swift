@@ -1655,6 +1655,7 @@ final class OverlayView: NSView {
                 bucket: ring.bucket,
                 color: ring.color
             )
+            drawUsagePaceMarker(ring: ring, observedAt: usageSnapshot.observedAt)
         }
         clearUsageRingGap()
     }
@@ -1737,6 +1738,41 @@ final class OverlayView: NSView {
         foreground.stroke()
     }
 
+    private func drawUsagePaceMarker(ring: DrawableUsageRing, observedAt: Date) {
+        guard let paceRemaining = ring.bucket.paceRemainingPercent(at: observedAt) else { return }
+        let angle = usageRingAngle(forRemainingPercent: paceRemaining)
+        let innerRadius = ring.radius - ring.lineWidth * 1.55
+        let outerRadius = ring.radius + ring.lineWidth * 1.55
+        let inner = CGPoint(
+            x: ring.center.x + cos(angle) * innerRadius,
+            y: ring.center.y + sin(angle) * innerRadius
+        )
+        let outer = CGPoint(
+            x: ring.center.x + cos(angle) * outerRadius,
+            y: ring.center.y + sin(angle) * outerRadius
+        )
+        let backing = NSBezierPath()
+        backing.move(to: inner)
+        backing.line(to: outer)
+        NSColor.white.withAlphaComponent(0.82).setStroke()
+        backing.lineWidth = max(1.8, ring.lineWidth * 0.68)
+        backing.lineCapStyle = .round
+        backing.stroke()
+
+        let marker = NSBezierPath()
+        marker.move(to: inner)
+        marker.line(to: outer)
+        NSColor.black.withAlphaComponent(0.72).setStroke()
+        marker.lineWidth = max(1.0, ring.lineWidth * 0.36)
+        marker.lineCapStyle = .round
+        marker.stroke()
+    }
+
+    private func usageRingAngle(forRemainingPercent remainingPercent: Double) -> CGFloat {
+        let clamped = min(max(remainingPercent, 0.0), 100.0)
+        return (247.5 - 315 * CGFloat(clamped / 100.0)) * .pi / 180.0
+    }
+
     private func clearUsageRingGap() {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         let rect = palRect()
@@ -1760,7 +1796,7 @@ final class OverlayView: NSView {
 
     private func drawUsageRingEndDot(center: CGPoint, radius: CGFloat, lineWidth: CGFloat, bucket: CodexUsageBucket, color: NSColor) {
         guard bucket.remainingPercent > 0.1 else { return }
-        let angle = (247.5 - 315 * CGFloat(bucket.remainingPercent / 100.0)) * .pi / 180.0
+        let angle = usageRingAngle(forRemainingPercent: bucket.remainingPercent)
         let point = CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
         let dotSize = max(3.0, lineWidth + 0.8)
         let dotRect = NSRect(x: point.x - dotSize / 2, y: point.y - dotSize / 2, width: dotSize, height: dotSize)
