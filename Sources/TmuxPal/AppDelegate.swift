@@ -43,13 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "TmuxPal"
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         rebuildStatusMenu()
     }
 
     private func rebuildStatusMenu() {
+        updateStatusButton()
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "表示/非表示", action: #selector(toggleOverlay), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "再読み込み", action: #selector(reloadOverlay), keyEquivalent: "r"))
@@ -70,6 +70,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "終了", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
+    }
+
+    private func updateStatusButton() {
+        guard let button = statusItem?.button else { return }
+        button.title = ""
+        button.image = PalSettings.statusBarImage()
+        button.imagePosition = .imageOnly
     }
 
     private func palSelectionMenuItem() -> NSMenuItem {
@@ -374,14 +381,21 @@ enum PalSettings {
 
     static func previewImage(forPalDirectory directory: URL) -> NSImage? {
         guard let metadataURL = metadataURL(in: directory) else { return nil }
-        let config = PalAssetConfig(metadataURL: metadataURL)
+        return firstFrameImage(for: PalAssetConfig(metadataURL: metadataURL), size: NSSize(width: 20, height: 22))
+    }
+
+    static func statusBarImage() -> NSImage? {
+        firstFrameImage(for: assetConfig(), size: NSSize(width: 18, height: 20))
+    }
+
+    private static func firstFrameImage(for config: PalAssetConfig, size: NSSize) -> NSImage? {
         guard validateSpritesheet(config.spritesheetURL),
               let sheet = NSImage(contentsOf: config.spritesheetURL),
               let cgImage = sheet.cgImage(forProposedRect: nil, context: nil, hints: nil),
               let cropped = cgImage.cropping(to: CGRect(x: 0, y: 0, width: 192, height: 208)) else {
             return nil
         }
-        let image = NSImage(cgImage: cropped, size: NSSize(width: 20, height: 22))
+        let image = NSImage(cgImage: cropped, size: size)
         image.isTemplate = false
         return image
     }
