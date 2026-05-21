@@ -1749,12 +1749,14 @@ enum TerminalActivator {
         } ?? candidates.first
 
         if let preferred {
-            preferred.activate(options: [.activateAllWindows])
             let name = preferred.localizedName?.lowercased() ?? ""
             let bundleId = preferred.bundleIdentifier?.lowercased() ?? ""
             if name.contains("ghostty") || bundleId.contains("ghostty") {
-                activateGhosttyByAppleScript(tabPrefix: ghosttyTabPrefix(for: pane))
+                if activateGhosttyByAppleScript(tabPrefix: ghosttyTabPrefix(for: pane)) {
+                    return
+                }
             }
+            preferred.activate(options: [])
         }
     }
 
@@ -1765,22 +1767,31 @@ enum TerminalActivator {
         return pane.sessionName == TmuxCollector.herdrSessionName ? "herdr" : "tmux"
     }
 
-    private static func activateGhosttyByAppleScript(tabPrefix: String?) {
+    private static func activateGhosttyByAppleScript(tabPrefix: String?) -> Bool {
         var error: NSDictionary?
         let script: String
         if let tabPrefix {
             script = """
-            tell application "Ghostty" to activate
             tell application "Ghostty"
+                set targetWindowId to missing value
+                set targetTabId to missing value
                 repeat with ghosttyWindow in windows
                     repeat with ghosttyTab in tabs of ghosttyWindow
                         if name of ghosttyTab starts with "\(tabPrefix)" then
-                            select tab ghosttyTab
-                            activate window ghosttyWindow
-                            return true
+                            set targetWindowId to id of ghosttyWindow as text
+                            set targetTabId to id of ghosttyTab as text
+                            exit repeat
                         end if
                     end repeat
+                    if targetWindowId is not missing value then exit repeat
                 end repeat
+                if targetWindowId is not missing value then
+                    set targetWindow to first window whose id is targetWindowId
+                    set targetTab to first tab of targetWindow whose id is targetTabId
+                    select tab targetTab
+                    activate window targetWindow
+                    return true
+                end if
             end tell
             return false
             """
@@ -1788,12 +1799,14 @@ enum TerminalActivator {
             script = #"tell application "Ghostty" to activate"#
         }
         if runOsaScript(script) {
-            return
+            return true
         }
         NSAppleScript(source: script)?.executeAndReturnError(&error)
         if let error {
             DebugLog.write("ghostty tab activation failed: \(error)")
+            return false
         }
+        return true
     }
 
     private static func runOsaScript(_ script: String) -> Bool {
@@ -1809,7 +1822,10 @@ enum TerminalActivator {
             try process.run()
             process.waitUntilExit()
             if process.terminationStatus == 0 {
-                return true
+                let outputData = (process.standardOutput as? Pipe)?.fileHandleForReading.readDataToEndOfFile() ?? Data()
+                let output = String(data: outputData, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return output != "false"
             }
             let data = error.fileHandleForReading.readDataToEndOfFile()
             let message = String(data: data, encoding: .utf8) ?? "osascript failed"
