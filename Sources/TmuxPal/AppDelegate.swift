@@ -1721,6 +1721,7 @@ final class OverlayView: NSView {
     }
 
     private func drawUsageRing(center: CGPoint, radius: CGFloat, lineWidth: CGFloat, bucket: CodexUsageBucket, color: NSColor) {
+        drawUsageRingTrack(center: center, radius: radius, lineWidth: lineWidth)
         guard bucket.remainingPercent > 0.1 else { return }
         let startAngle: CGFloat = 247.5
         let sweep: CGFloat = 315
@@ -1738,11 +1739,26 @@ final class OverlayView: NSView {
         foreground.stroke()
     }
 
+    private func drawUsageRingTrack(center: CGPoint, radius: CGFloat, lineWidth: CGFloat) {
+        let track = NSBezierPath()
+        track.appendArc(
+            withCenter: center,
+            radius: radius,
+            startAngle: 247.5,
+            endAngle: -67.5,
+            clockwise: true
+        )
+        NSColor(calibratedWhite: 0.68, alpha: 0.34).setStroke()
+        track.lineWidth = lineWidth
+        track.lineCapStyle = .round
+        track.stroke()
+    }
+
     private func drawUsagePaceMarker(ring: DrawableUsageRing, observedAt: Date) {
         guard let paceRemaining = ring.bucket.paceRemainingPercent(at: observedAt) else { return }
         let angle = usageRingAngle(forRemainingPercent: paceRemaining)
-        let innerRadius = ring.radius - ring.lineWidth * 1.55
-        let outerRadius = ring.radius + ring.lineWidth * 1.55
+        let innerRadius = ring.radius - ring.lineWidth * 0.78
+        let outerRadius = ring.radius + ring.lineWidth * 0.78
         let inner = CGPoint(
             x: ring.center.x + cos(angle) * innerRadius,
             y: ring.center.y + sin(angle) * innerRadius
