@@ -53,6 +53,20 @@ If macOS blocks an unsigned or non-notarized build, use a local source build or
 trust the downloaded app manually only when you are comfortable with the exact
 artifact you downloaded.
 
+Current public artifacts may be ad-hoc signed when the maintainer's Developer ID
+certificate is not configured in GitHub Actions. In that case Gatekeeper can
+reject the app even though the checksum matches the release. To run that
+artifact locally:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/TmuxPal.app
+codesign --force --deep --sign - /Applications/TmuxPal.app
+open /Applications/TmuxPal.app
+```
+
+This only makes your local copy launchable. It is not a substitute for Developer
+ID signing and notarization for public distribution.
+
 ## Build From Source
 
 ```bash
@@ -166,6 +180,26 @@ GitHub Actions runs tests, builds the app, creates a zip and dmg, writes
 SHA-256 checksums, and attaches the files to the GitHub Release. When Developer
 ID and notarization secrets are configured, the release workflow signs and
 notarizes the artifacts; otherwise it falls back to ad-hoc signing.
+
+Required GitHub Actions secrets for signed public artifacts:
+
+- `CODESIGN_IDENTITY`
+- `APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`
+- `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`
+- `APPLE_ID`
+- `APPLE_TEAM_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `KEYCHAIN_PASSWORD` (optional)
+
+Verify a downloaded release before publishing or announcing it:
+
+```bash
+codesign -dv --verbose=4 /Applications/TmuxPal.app
+spctl -a -vvv /Applications/TmuxPal.app
+```
+
+`Signature=adhoc` or `spctl ... rejected` means the artifact is not notarized
+for normal public macOS distribution.
 
 ## License
 

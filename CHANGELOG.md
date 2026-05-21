@@ -8,6 +8,8 @@ TmuxPal v0.9.1 polishes the repository for public distribution.
 
 - Reworked the README for public users, including install, privacy, tmux hooks,
   pal assets, and Codex usage-ring behavior.
+- Documented the current ad-hoc signing fallback, local launch workaround, and
+  Developer ID notarization requirements for public artifacts.
 - Replaced the app icon with a simpler public-facing icon that keeps Dokochan,
   tmux panes, and green usage rings visible at small sizes.
 - Added GitHub repository description, homepage, and topics.
