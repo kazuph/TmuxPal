@@ -2487,7 +2487,8 @@ struct PalSpriteLoader {
         let bytesPerRow = context.bytesPerRow
         let width = cgImage.width
         let height = cgImage.height
-        var buckets: [String: (red: CGFloat, green: CGFloat, blue: CGFloat, count: Int)] = [:]
+        var preferredBuckets: [String: (red: CGFloat, green: CGFloat, blue: CGFloat, count: Int)] = [:]
+        var fallbackBuckets: [String: (red: CGFloat, green: CGFloat, blue: CGFloat, count: Int)] = [:]
         let step = max(8, min(width, height) / 90)
 
         for y in stride(from: 0, to: height, by: step) {
@@ -2503,17 +2504,14 @@ struct PalSpriteLoader {
                 let minComponent = min(red, green, blue)
                 let saturation = maxComponent == 0 ? 0 : (maxComponent - minComponent) / maxComponent
                 guard saturation > 0.16, maxComponent > 0.20, maxComponent < 0.96 else { continue }
-                let key = "\(Int(red * 5))-\(Int(green * 5))-\(Int(blue * 5))"
-                let current = buckets[key] ?? (0, 0, 0, 0)
-                buckets[key] = (
-                    current.red + red,
-                    current.green + green,
-                    current.blue + blue,
-                    current.count + 1
-                )
+                Self.addSample(red: red, green: green, blue: blue, to: &fallbackBuckets)
+                if !Self.isLikelyHumanTone(red: red, green: green, blue: blue, saturation: saturation, brightness: maxComponent) {
+                    Self.addSample(red: red, green: green, blue: blue, to: &preferredBuckets)
+                }
             }
         }
 
+        let buckets = preferredBuckets.isEmpty ? fallbackBuckets : preferredBuckets
         guard let dominant = buckets.values.max(by: { $0.count < $1.count }), dominant.count > 0 else {
             return UsageRingPalette.defaultBase
         }
@@ -2523,6 +2521,58 @@ struct PalSpriteLoader {
             blue: dominant.blue / CGFloat(dominant.count),
             alpha: 1.0
         )
+    }
+
+    private static func addSample(
+        red: CGFloat,
+        green: CGFloat,
+        blue: CGFloat,
+        to buckets: inout [String: (red: CGFloat, green: CGFloat, blue: CGFloat, count: Int)]
+    ) {
+        let key = "\(Int(red * 5))-\(Int(green * 5))-\(Int(blue * 5))"
+        let current = buckets[key] ?? (0, 0, 0, 0)
+        buckets[key] = (
+            current.red + red,
+            current.green + green,
+            current.blue + blue,
+            current.count + 1
+        )
+    }
+
+    private static func isLikelyHumanTone(
+        red: CGFloat,
+        green: CGFloat,
+        blue: CGFloat,
+        saturation: CGFloat,
+        brightness: CGFloat
+    ) -> Bool {
+        let hue = hue(red: red, green: green, blue: blue)
+        let warmHue = hue <= 0.13 || hue >= 0.97
+        let humanWarmRamp = warmHue
+            && red >= green
+            && green >= blue
+            && saturation >= 0.12
+            && saturation <= 0.82
+            && brightness >= 0.16
+            && brightness <= 0.96
+        return humanWarmRamp
+    }
+
+    private static func hue(red: CGFloat, green: CGFloat, blue: CGFloat) -> CGFloat {
+        let maxComponent = max(red, green, blue)
+        let minComponent = min(red, green, blue)
+        let delta = maxComponent - minComponent
+        guard delta > 0 else { return 0 }
+        let rawHue: CGFloat
+        if maxComponent == red {
+            rawHue = ((green - blue) / delta).truncatingRemainder(dividingBy: 6)
+        } else if maxComponent == green {
+            rawHue = (blue - red) / delta + 2
+        } else {
+            rawHue = (red - green) / delta + 4
+        }
+        let normalized = rawHue / 6
+        return normalized < 0 ? normalized + 1 : normalized
     }
 
     private static func rgbaContext(width: Int, height: Int) -> CGContext? {
