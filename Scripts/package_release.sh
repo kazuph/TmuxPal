@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
-version="${1:-${GITHUB_REF_NAME:-0.2.0}}"
+version="${1:-${GITHUB_REF_NAME:-0.9.0}}"
 version="${version#v}"
 dist_dir="$repo_dir/dist"
 app_path="$dist_dir/TmuxPal.app"
