@@ -296,12 +296,21 @@ public struct TmuxCollector: Sendable {
 
     private func captureTranscript(for paneId: String) -> String {
         if isHerdrPaneId(paneId) {
-            return (try? runHerdr(["agent", "read", paneId, "--source", "recent-unwrapped", "--lines", "16", "--format", "text"])) ?? ""
+            let output = (try? runHerdr(["agent", "read", paneId, "--source", "recent-unwrapped", "--lines", "16", "--format", "text"])) ?? ""
+            return Self.herdrReadText(from: output)
         }
         guard let output = try? runTmux(["capture-pane", "-p", "-J", "-t", paneId, "-S", "-16"]) else {
             return ""
         }
         return output
+    }
+
+    static func herdrReadText(from output: String) -> String {
+        guard let data = output.data(using: .utf8),
+              let response = try? JSONDecoder().decode(HerdrAgentReadResponse.self, from: data) else {
+            return output
+        }
+        return response.result.read.text
     }
 
     private func cachedTranscript(for pane: TmuxPane) -> (excerpt: String, tail: String) {
@@ -322,6 +331,7 @@ public struct TmuxCollector: Sendable {
     }
 
     private func summarizeTranscript(_ output: String) -> String {
+        let output = Self.herdrReadText(from: output)
         let noise = [
             "esc to interrupt",
             "esc to cancel",
@@ -341,6 +351,9 @@ public struct TmuxCollector: Sendable {
             .filter { !$0.isEmpty }
             .filter { line in
                 let lower = line.lowercased()
+                if lower.contains("\"id\":\"cli:") && lower.contains("\"result\":") {
+                    return false
+                }
                 if noise.contains(where: lower.contains) {
                     return false
                 }
@@ -444,6 +457,18 @@ private struct HerdrPaneListResponse: Decodable {
 
     struct Result: Decodable {
         let panes: [HerdrPaneSnapshot]
+    }
+}
+
+private struct HerdrAgentReadResponse: Decodable {
+    let result: Result
+
+    struct Result: Decodable {
+        let read: Read
+    }
+
+    struct Read: Decodable {
+        let text: String
     }
 }
 

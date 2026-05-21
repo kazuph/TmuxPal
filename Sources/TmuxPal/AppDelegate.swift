@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import ServiceManagement
+import SQLite3
 import TmuxPalCore
 import UniformTypeIdentifiers
 
@@ -56,7 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(palSelectionMenuItem())
         menu.addItem(palSizeMenuItem())
         menu.addItem(NSMenuItem(title: "デフォルトに戻す", action: #selector(useDefaultPal), keyEquivalent: ""))
+        menu.addItem(palGalleryMenuItem())
         menu.addItem(screenshotMenuItem())
+        menu.addItem(usageRingModeMenuItem())
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "tmux hooks を再インストール", action: #selector(reinstallTmuxHooks), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "tmux hooks を削除", action: #selector(uninstallTmuxHooks), keyEquivalent: ""))
@@ -85,10 +88,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 item.representedObject = directory
                 item.state = PalSettings.selectedPalDirectory?.standardizedFileURL == directory.standardizedFileURL ? .on : .off
+                item.image = PalSettings.previewImage(forPalDirectory: directory)
                 submenu.addItem(item)
             }
         }
 
+        rootItem.submenu = submenu
+        return rootItem
+    }
+
+    private func palGalleryMenuItem() -> NSMenuItem {
+        let rootItem = NSMenuItem(title: "パルを探す", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        submenu.addItem(NSMenuItem(title: "Petdex を開く", action: #selector(openPetdex), keyEquivalent: ""))
+        submenu.addItem(NSMenuItem(title: "awesome-codex-pet を開く", action: #selector(openAwesomeCodexPet), keyEquivalent: ""))
         rootItem.submenu = submenu
         return rootItem
     }
@@ -115,6 +128,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         modeItem.state = overlayController?.isScreenshotModeEnabled == true ? .on : .off
         submenu.addItem(modeItem)
         submenu.addItem(NSMenuItem(title: "PNG一式を書き出し...", action: #selector(exportScreenshotSet), keyEquivalent: ""))
+        rootItem.submenu = submenu
+        return rootItem
+    }
+
+    private func usageRingModeMenuItem() -> NSMenuItem {
+        let rootItem = NSMenuItem(title: "Codex usage rings", action: nil, keyEquivalent: "")
+        let submenu = NSMenu()
+        let currentMode = overlayController?.usageRingMode ?? .rings
+        for mode in UsageRingDisplayMode.allCases {
+            let item = NSMenuItem(title: mode.menuTitle, action: #selector(selectUsageRingMode(_:)), keyEquivalent: "")
+            item.representedObject = mode.rawValue
+            item.state = currentMode == mode ? .on : .off
+            submenu.addItem(item)
+        }
         rootItem.submenu = submenu
         return rootItem
     }
@@ -150,8 +177,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let directory = url.hasDirectoryPath ? url : url.deletingLastPathComponent()
-        guard PalSettings.metadataURL(in: directory) != nil else {
-            DebugLog.write("pal selection ignored: metadata not found in \(directory.path)")
+        guard PalSettings.validatePalDirectory(directory) else {
+            DebugLog.write("pal selection ignored: invalid pal package in \(directory.path)")
             return
         }
         PalSettings.selectedPalDirectory = directory
@@ -188,6 +215,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let overlayController else { return }
         overlayController.setScreenshotModeEnabled(!overlayController.isScreenshotModeEnabled)
         rebuildStatusMenu()
+    }
+
+    @objc private func selectUsageRingMode(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let mode = UsageRingDisplayMode(rawValue: rawValue) else {
+            return
+        }
+        overlayController?.setUsageRingMode(mode)
+        rebuildStatusMenu()
+    }
+
+    @objc private func openPetdex() {
+        NSWorkspace.shared.open(URL(string: "https://petdex.crafter.run")!)
+    }
+
+    @objc private func openAwesomeCodexPet() {
+        NSWorkspace.shared.open(URL(string: "https://awesome-codex-pet.pages.dev")!)
     }
 
     @objc private func exportScreenshotSet() {
@@ -240,13 +284,13 @@ enum SingleInstanceGuard {
 enum PalSettings {
     private static let selectedPalDirectoryKey = "selectedPalDirectory"
     private static let displaySizeKey = "palDisplaySize"
+    private static let codexHome = ProcessInfo.processInfo.environment["CODEX_HOME"].flatMap { value -> URL? in
+        value.isEmpty ? nil : URL(fileURLWithPath: value)
+    } ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
     private static let userCharacterRoot = FileManager.default
         .homeDirectoryForCurrentUser
         .appendingPathComponent(".codex/tmuxpal/characters")
-    private static let legacyCharacterRoot = FileManager.default
-        .homeDirectoryForCurrentUser
-        .appendingPathComponent(".codex")
-        .appendingPathComponent(["pe", "ts"].joined())
+    private static let legacyCharacterRoot = codexHome.appendingPathComponent(["pe", "ts"].joined())
 
     static var selectedPalDirectory: URL? {
         get {
@@ -303,6 +347,7 @@ enum PalSettings {
             .filter { url in
                 (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
                     && metadataURL(in: url) != nil
+                    && validatePalDirectory(url)
                     && seen.insert(url.standardizedFileURL.path).inserted
             }
             .sorted { displayName(forPalDirectory: $0).localizedCaseInsensitiveCompare(displayName(forPalDirectory: $1)) == .orderedAscending }
@@ -327,6 +372,20 @@ enum PalSettings {
         return directory.lastPathComponent
     }
 
+    static func previewImage(forPalDirectory directory: URL) -> NSImage? {
+        guard let metadataURL = metadataURL(in: directory) else { return nil }
+        let config = PalAssetConfig(metadataURL: metadataURL)
+        guard validateSpritesheet(config.spritesheetURL),
+              let sheet = NSImage(contentsOf: config.spritesheetURL),
+              let cgImage = sheet.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let cropped = cgImage.cropping(to: CGRect(x: 0, y: 0, width: 192, height: 208)) else {
+            return nil
+        }
+        let image = NSImage(cgImage: cropped, size: NSSize(width: 20, height: 22))
+        image.isTemplate = false
+        return image
+    }
+
     static func metadataURL(in directory: URL) -> URL? {
         for name in ["pal.json", ["pe", "t"].joined() + ".json"] {
             let url = directory.appendingPathComponent(name)
@@ -335,6 +394,26 @@ enum PalSettings {
             }
         }
         return nil
+    }
+
+    static func validatePalDirectory(_ directory: URL) -> Bool {
+        guard let metadataURL = metadataURL(in: directory),
+              let data = try? Data(contentsOf: metadataURL),
+              let request = try? JSONDecoder().decode(PalRequest.self, from: data),
+              !request.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
+        return validateSpritesheet(PalAssetConfig(metadataURL: metadataURL).spritesheetURL)
+    }
+
+    private static func validateSpritesheet(_ url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path),
+              ["webp", "png"].contains(url.pathExtension.lowercased()),
+              let sheet = NSImage(contentsOf: url),
+              let cgImage = sheet.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return false
+        }
+        return cgImage.width == 1536 && cgImage.height == 1872
     }
 
     private static func bundledDokochanDirectory() -> URL? {
@@ -527,6 +606,137 @@ enum TmuxHookInstaller {
     }
 }
 
+struct CodexUsageReader {
+    private let codexHome = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+    private let usageURL = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
+
+    func readLatest() async -> CodexUsageSnapshot? {
+        if let live = await readLiveUsage() {
+            return live
+        }
+        return readLatestLog()
+    }
+
+    private func readLiveUsage() async -> CodexUsageSnapshot? {
+        guard let token = accessToken() else { return nil }
+        var request = URLRequest(url: usageURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 6
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("en-US", forHTTPHeaderField: "Accept-Language")
+        request.setValue("Codex Desktop", forHTTPHeaderField: "originator")
+        if let accountID = accountID(fromAccessToken: token) {
+            request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
+        }
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            return nil
+        }
+        return CodexUsageParser.snapshot(from: data, source: "live")
+    }
+
+    private func accessToken() -> String? {
+        let authURL = codexHome.appendingPathComponent("auth.json")
+        guard let data = try? Data(contentsOf: authURL),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = object["tokens"] as? [String: Any],
+              let token = tokens["access_token"] as? String,
+              !token.isEmpty else {
+            return nil
+        }
+        return token
+    }
+
+    private func accountID(fromAccessToken token: String) -> String? {
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var payload = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let padding = payload.count % 4
+        if padding > 0 {
+            payload += String(repeating: "=", count: 4 - padding)
+        }
+        guard let data = Data(base64Encoded: payload),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let auth = object["https://api.openai.com/auth"] as? [String: Any] else {
+            return nil
+        }
+        return auth["chatgpt_account_id"] as? String
+    }
+
+    private func readLatestLog() -> CodexUsageSnapshot? {
+        let logsURL = codexHome.appendingPathComponent("logs_2.sqlite")
+        guard FileManager.default.fileExists(atPath: logsURL.path) else { return nil }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(logsURL.path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK,
+              let db else {
+            return nil
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+        SELECT feedback_log_body
+        FROM logs
+        WHERE feedback_log_body LIKE '%"type":"codex.rate_limits"%'
+        ORDER BY ts DESC, ts_nanos DESC, id DESC
+        LIMIT 1
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            return nil
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let text = sqlite3_column_text(statement, 0) else {
+            return nil
+        }
+        let body = String(cString: text)
+        guard let json = extractRateLimitJSON(from: body),
+              let data = json.data(using: .utf8) else {
+            return nil
+        }
+        return CodexUsageParser.snapshot(from: data, source: "log")
+    }
+
+    private func extractRateLimitJSON(from body: String) -> String? {
+        guard let start = body.range(of: "{\"type\":\"codex.rate_limits\"")?.lowerBound else {
+            return nil
+        }
+        var depth = 0
+        var inString = false
+        var escaping = false
+        var index = start
+        while index < body.endIndex {
+            let character = body[index]
+            if inString {
+                if escaping {
+                    escaping = false
+                } else if character == "\\" {
+                    escaping = true
+                } else if character == "\"" {
+                    inString = false
+                }
+            } else if character == "\"" {
+                inString = true
+            } else if character == "{" {
+                depth += 1
+            } else if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    return String(body[start...index])
+                }
+            }
+            index = body.index(after: index)
+        }
+        return nil
+    }
+}
+
 @MainActor
 final class OverlayController {
     private let window: OverlayPanel
@@ -539,6 +749,8 @@ final class OverlayController {
     private var isUpdating = false
     private var palAnchorScreenCenter: CGPoint?
     private var screenshotModeEnabled = false
+    private var usageTimer: Timer?
+    private let codexUsageReader = CodexUsageReader()
 
     init() {
         overlayView = OverlayView(palAssetConfig: PalSettings.assetConfig())
@@ -568,6 +780,7 @@ final class OverlayController {
             }
             do {
                 try self?.collector.focus(pane)
+                self?.overlayView.setHighlightedPaneId(pane.paneId, manual: true)
                 DebugLog.write("focused pane=\(pane.sessionName):\(pane.windowIndex).\(pane.paneIndex) \(pane.paneId)")
             } catch {
                 DebugLog.write("focus failed pane=\(pane.paneId): \(error.localizedDescription)")
@@ -593,6 +806,7 @@ final class OverlayController {
         window.displayIfNeeded()
         DebugLog.write("overlay shown frame=\(NSStringFromRect(window.frame))")
         startTimer()
+        startUsageTimer()
     }
 
     func toggle() {
@@ -607,6 +821,7 @@ final class OverlayController {
         }
         updatePanes()
         reloadPalAssets()
+        Task { await reloadUsage() }
     }
 
     func reloadPalAssets() {
@@ -624,6 +839,10 @@ final class OverlayController {
         screenshotModeEnabled
     }
 
+    var usageRingMode: UsageRingDisplayMode {
+        overlayView.usageRingMode
+    }
+
     func setScreenshotModeEnabled(_ enabled: Bool) {
         screenshotModeEnabled = enabled
         if enabled {
@@ -633,6 +852,12 @@ final class OverlayController {
             overlayView.setCollapsed(false, persist: false)
             updatePanes()
         }
+    }
+
+    func setUsageRingMode(_ mode: UsageRingDisplayMode) {
+        overlayView.setUsageRingMode(mode)
+        fitWindow()
+        Task { await reloadUsage() }
     }
 
     func exportScreenshotSet(to directory: URL) -> [URL] {
@@ -695,6 +920,16 @@ final class OverlayController {
         updatePanes()
     }
 
+    private func startUsageTimer() {
+        usageTimer?.invalidate()
+        usageTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            Task { [weak self] in
+                await self?.reloadUsage()
+            }
+        }
+        Task { await reloadUsage() }
+    }
+
     private func updatePanes() {
         if screenshotModeEnabled {
             applyScreenshotModeBubbles()
@@ -747,11 +982,27 @@ final class OverlayController {
         overlayView.setBubbles(bubbles)
         fitWindow()
         if let snapshotPath = ProcessInfo.processInfo.environment["TMUXPAL_SNAPSHOT_PATH"] {
+            overlayView.displayIfNeeded()
             overlayView.writeSnapshot(to: URL(fileURLWithPath: snapshotPath))
         }
         if lastLoggedBubbleCount != bubbles.count {
             DebugLog.write("updated panes=\(paneCount) bubbles=\(bubbles.count) frame=\(NSStringFromRect(window.frame))")
             lastLoggedBubbleCount = bubbles.count
+        }
+    }
+
+    private func reloadUsage() async {
+        guard overlayView.showsUsageRings else {
+            overlayView.setUsageSnapshot(nil)
+            return
+        }
+        let reader = codexUsageReader
+        let snapshot = await Task.detached(priority: .utility) {
+            await reader.readLatest()
+        }.value
+        overlayView.setUsageSnapshot(snapshot)
+        if let snapshotPath = ProcessInfo.processInfo.environment["TMUXPAL_SNAPSHOT_PATH"] {
+            overlayView.writeSnapshot(to: URL(fileURLWithPath: snapshotPath))
         }
     }
 
@@ -996,6 +1247,20 @@ private enum BubbleDensity {
     case singleLine
 }
 
+enum UsageRingDisplayMode: String, CaseIterable {
+    case off
+    case rings
+    case labeled
+
+    var menuTitle: String {
+        switch self {
+        case .off: return "オフ"
+        case .rings: return "リングのみ"
+        case .labeled: return "ラベル付き"
+        }
+    }
+}
+
 @MainActor
 final class OverlayView: NSView {
     static let basePalSize = NSSize(width: 77, height: 85)
@@ -1013,6 +1278,8 @@ final class OverlayView: NSView {
     static let collapsedBadgeRightOutset: CGFloat = 32
     static let collapsedBadgeTopOutset: CGFloat = 14
     static let collapsedBadgeHorizontalAnchor: CGFloat = 0.72
+    static let usageRingLabelOutset: CGFloat = 58
+    static let usageRingModeDefaultsKey = "codexUsageRingMode"
 
     var onDrag: ((_ screenPoint: CGPoint, _ palGrabOffset: CGPoint, _ horizontalDelta: CGFloat) -> Void)?
     var onClickPane: ((TmuxPane) -> Void)?
@@ -1039,13 +1306,25 @@ final class OverlayView: NSView {
     private let runClassifier = BubbleRunClassifier()
     private var runStatesByPaneId: [String: BubbleRunState] = [:]
     private var completedBubbleCount = 0
+    private var highlightedPaneId: String?
+    private var manuallyHighlightedPaneId: String?
+    private var acknowledgedPaneIds: Set<String> = []
     private var bubbleHorizontalSide: BubbleHorizontalSide = .left
     private var bubbleVerticalSide: BubbleVerticalSide = .above
     private(set) var showsBubbleUI = true
+    private(set) var usageRingMode = UsageRingDisplayMode(
+        rawValue: UserDefaults.standard.string(forKey: usageRingModeDefaultsKey) ?? ""
+    ) ?? .rings
+    var showsUsageRings: Bool {
+        usageRingMode != .off
+    }
+    private var usageSnapshot: CodexUsageSnapshot?
+    private var usageRingPalette = UsageRingPalette.default
 
     init(frame frameRect: NSRect = .zero, palAssetConfig: PalAssetConfig) {
         self.palAssetConfig = palAssetConfig
         super.init(frame: frameRect)
+        wantsLayer = false
         reloadPalAssets()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 0.24, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -1145,14 +1424,25 @@ final class OverlayView: NSView {
 
     func preferredSize() -> NSSize {
         if !showsBubbleUI {
-            return NSSize(width: palSize.width + Self.padding * 2, height: palSize.height + Self.padding * 2)
+            return NSSize(
+                width: palSize.width + Self.padding * 2 + usageRingLabelWidth,
+                height: palSize.height + Self.padding * 2
+            )
         }
-        return Self.size(
+        var size = Self.size(
             forBubbleCount: max(1, bubbles.count),
             collapsed: isCollapsed,
             palSize: palSize,
             bubbleVerticalSide: bubbleVerticalSide
         )
+        if isCollapsed {
+            size.width += usageRingLabelWidth
+        }
+        return size
+    }
+
+    private var usageRingLabelWidth: CGFloat {
+        usageRingMode == .labeled ? Self.usageRingLabelOutset : 0
     }
 
     func updateBubbleLayout(palCenter: CGPoint, visibleFrame: NSRect) {
@@ -1188,7 +1478,9 @@ final class OverlayView: NSView {
         if let config {
             palAssetConfig = config
         }
-        framesByState = PalSpriteLoader(config: palAssetConfig).loadFrames()
+        let loader = PalSpriteLoader(config: palAssetConfig)
+        framesByState = loader.loadFrames()
+        usageRingPalette = UsageRingPalette.derived(from: loader.dominantColor())
         DebugLog.write("pal assets loaded states=\(framesByState.keys.sorted().joined(separator: ","))")
         needsDisplay = true
     }
@@ -1219,6 +1511,17 @@ final class OverlayView: NSView {
         onCollapseChanged?()
     }
 
+    func setUsageRingMode(_ usageRingMode: UsageRingDisplayMode) {
+        self.usageRingMode = usageRingMode
+        UserDefaults.standard.set(usageRingMode.rawValue, forKey: Self.usageRingModeDefaultsKey)
+        needsDisplay = true
+    }
+
+    func setUsageSnapshot(_ snapshot: CodexUsageSnapshot?) {
+        usageSnapshot = snapshot?.hasVisibleBuckets == true ? snapshot : nil
+        needsDisplay = true
+    }
+
     func setBubbles(_ bubbles: [PaneBubble]) {
         self.bubbles = bubbles.sorted { lhs, rhs in
             let leftSessionRank = lhs.pane.sessionName == "0" ? 0 : 1
@@ -1241,9 +1544,20 @@ final class OverlayView: NSView {
             }
             return lhs.pane.sessionName < rhs.pane.sessionName
         }
-        runStatesByPaneId = Dictionary(uniqueKeysWithValues: self.bubbles.map { bubble in
+        let previousRunStates = runStatesByPaneId
+        let nextRunStates = Dictionary(uniqueKeysWithValues: self.bubbles.map { bubble in
             (bubble.pane.paneId, runClassifier.classify(bubble))
         })
+        runStatesByPaneId = nextRunStates
+        for (paneId, state) in nextRunStates where state == .running && previousRunStates[paneId] != .running {
+            acknowledgedPaneIds.remove(paneId)
+        }
+        let paneIds = Set(self.bubbles.map { $0.pane.paneId })
+        acknowledgedPaneIds.formIntersection(paneIds)
+        updateHighlightedPaneId()
+        for bubble in self.bubbles where bubble.pane.active && runState(for: bubble) != .running {
+            acknowledgedPaneIds.insert(bubble.pane.paneId)
+        }
         completedBubbleCount = runStatesByPaneId.values.filter { $0 == .complete }.count
         if bubbles.isEmpty {
             setAnimationState("waiting")
@@ -1255,6 +1569,25 @@ final class OverlayView: NSView {
             setAnimationState("idle")
         }
         needsDisplay = true
+    }
+
+    func setHighlightedPaneId(_ paneId: String, manual: Bool) {
+        highlightedPaneId = paneId
+        acknowledgedPaneIds.insert(paneId)
+        if manual {
+            manuallyHighlightedPaneId = paneId
+        }
+        needsDisplay = true
+    }
+
+    private func updateHighlightedPaneId() {
+        let paneIds = Set(bubbles.map { $0.pane.paneId })
+        if let manual = manuallyHighlightedPaneId, paneIds.contains(manual) {
+            highlightedPaneId = manual
+            return
+        }
+        manuallyHighlightedPaneId = nil
+        highlightedPaneId = bubbles.first(where: { $0.pane.active })?.pane.paneId
     }
 
     func setDragging(horizontalDelta: CGFloat) {
@@ -1270,8 +1603,11 @@ final class OverlayView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        NSGraphicsContext.current?.cgContext.clear(dirtyRect)
         super.draw(dirtyRect)
         if dirtyRect.intersects(palRect()) {
+            drawUsageRings()
+            drawUsageRingLabels()
             drawPal()
         }
         if !showsBubbleUI {
@@ -1307,6 +1643,152 @@ final class OverlayView: NSView {
             NSColor.systemGreen.withAlphaComponent(0.25).setFill()
             palRect.fill()
         }
+    }
+
+    private func drawUsageRings() {
+        guard showsUsageRings, let usageSnapshot else { return }
+        for ring in usageRings(from: usageSnapshot) {
+            drawUsageRing(
+                center: ring.center,
+                radius: ring.radius,
+                lineWidth: ring.lineWidth,
+                bucket: ring.bucket,
+                color: ring.color
+            )
+        }
+        clearUsageRingGap()
+    }
+
+    private func drawUsageRingLabels() {
+        guard usageRingMode == .labeled, showsUsageRings, let usageSnapshot else { return }
+        let rings = usageRings(from: usageSnapshot)
+        for ring in rings {
+            drawUsageRingTag(ring.label, bucket: ring.bucket, center: ring.center, radius: ring.radius, color: ring.color, yOffset: ring.labelYOffset)
+            drawUsageRingEndDot(center: ring.center, radius: ring.radius, lineWidth: ring.lineWidth, bucket: ring.bucket, color: ring.color)
+        }
+    }
+
+    private struct DrawableUsageRing {
+        let label: String
+        let bucket: CodexUsageBucket
+        let color: NSColor
+        let center: CGPoint
+        let radius: CGFloat
+        let lineWidth: CGFloat
+        let labelYOffset: CGFloat
+    }
+
+    private func usageRings(from usageSnapshot: CodexUsageSnapshot) -> [DrawableUsageRing] {
+        let rect = palRect()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let baseRadius = min(rect.width, rect.height) / 2
+        var rings: [DrawableUsageRing] = []
+        if let monthly = usageSnapshot.monthly {
+            rings.append(DrawableUsageRing(
+                label: "M",
+                bucket: monthly,
+                color: usageRingPalette.monthly,
+                center: center,
+                radius: baseRadius - 0.5,
+                lineWidth: 4.0,
+                labelYOffset: 17
+            ))
+        }
+        if let weekly = usageSnapshot.weekly {
+            rings.append(DrawableUsageRing(
+                label: "W",
+                bucket: weekly,
+                color: usageRingPalette.weekly,
+                center: center,
+                radius: baseRadius - 7.0,
+                lineWidth: 3.4,
+                labelYOffset: 3
+            ))
+        }
+        if let shortTerm = usageSnapshot.shortTerm {
+            rings.append(DrawableUsageRing(
+                label: shortTerm.label,
+                bucket: shortTerm,
+                color: usageRingPalette.shortTerm,
+                center: center,
+                radius: baseRadius - 13.0,
+                lineWidth: 3.0,
+                labelYOffset: -11
+            ))
+        }
+        return rings
+    }
+
+    private func drawUsageRing(center: CGPoint, radius: CGFloat, lineWidth: CGFloat, bucket: CodexUsageBucket, color: NSColor) {
+        guard bucket.remainingPercent > 0.1 else { return }
+        let startAngle: CGFloat = 247.5
+        let sweep: CGFloat = 315
+        let foreground = NSBezierPath()
+        foreground.appendArc(
+            withCenter: center,
+            radius: radius,
+            startAngle: startAngle,
+            endAngle: startAngle - sweep * CGFloat(bucket.remainingPercent / 100.0),
+            clockwise: true
+        )
+        color.withAlphaComponent(0.96).setStroke()
+        foreground.lineWidth = lineWidth
+        foreground.lineCapStyle = .round
+        foreground.stroke()
+    }
+
+    private func clearUsageRingGap() {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let rect = palRect()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let baseRadius = min(rect.width, rect.height) / 2
+        context.saveGState()
+        context.setBlendMode(.clear)
+        for (radius, lineWidth) in [
+            (baseRadius - 0.5, CGFloat(7.5)),
+            (baseRadius - 7.0, CGFloat(7.0)),
+            (baseRadius - 13.0, CGFloat(6.5))
+        ] {
+            let gap = NSBezierPath()
+            gap.appendArc(withCenter: center, radius: radius, startAngle: 247.5, endAngle: 292.5, clockwise: false)
+            gap.lineWidth = lineWidth
+            gap.lineCapStyle = .butt
+            gap.stroke()
+        }
+        context.restoreGState()
+    }
+
+    private func drawUsageRingEndDot(center: CGPoint, radius: CGFloat, lineWidth: CGFloat, bucket: CodexUsageBucket, color: NSColor) {
+        guard bucket.remainingPercent > 0.1 else { return }
+        let angle = (247.5 - 315 * CGFloat(bucket.remainingPercent / 100.0)) * .pi / 180.0
+        let point = CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
+        let dotSize = max(3.0, lineWidth + 0.8)
+        let dotRect = NSRect(x: point.x - dotSize / 2, y: point.y - dotSize / 2, width: dotSize, height: dotSize)
+        color.setFill()
+        NSBezierPath(ovalIn: dotRect).fill()
+    }
+
+    private func drawUsageRingTag(_ label: String, bucket: CodexUsageBucket, center: CGPoint, radius: CGFloat, color: NSColor, yOffset: CGFloat) {
+        let text = "\(label.replacingOccurrences(of: " ", with: "")) \(Int(round(bucket.remainingPercent)))%"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .bold),
+            .foregroundColor: NSColor.white
+        ]
+        let textSize = NSString(string: text).size(withAttributes: attrs)
+        let padding = NSSize(width: 5, height: 2.5)
+        let tagRect = NSRect(
+            x: center.x - radius - textSize.width - padding.width * 2 - 7,
+            y: center.y + yOffset,
+            width: textSize.width + padding.width * 2,
+            height: textSize.height + padding.height * 2
+        )
+        let background = NSBezierPath(roundedRect: tagRect, xRadius: 5, yRadius: 5)
+        color.withAlphaComponent(0.96).setFill()
+        background.fill()
+        NSString(string: text).draw(
+            at: CGPoint(x: tagRect.minX + padding.width, y: tagRect.minY + padding.height - 0.5),
+            withAttributes: attrs
+        )
     }
 
     private func drawBubbles(dirtyRect: NSRect) {
@@ -1346,14 +1828,22 @@ final class OverlayView: NSView {
         if dirtyRect.width <= statusRect.width + 8,
            dirtyRect.height <= statusRect.height + 8,
            dirtyRect.intersects(statusRect.insetBy(dx: -2, dy: -2)) {
-            drawStatus(in: statusRect, state: runState(for: bubble))
+            drawStatus(in: statusRect, bubble: bubble)
             return
         }
 
         let path = NSBezierPath(roundedRect: rect, xRadius: 13, yRadius: 13)
-        NSColor.white.withAlphaComponent(0.92).setFill()
+        if isHighlighted(bubble) {
+            NSColor(calibratedRed: 0.92, green: 1.0, blue: 0.94, alpha: 0.96).setFill()
+        } else {
+            NSColor.white.withAlphaComponent(0.92).setFill()
+        }
         path.fill()
-        NSColor.black.withAlphaComponent(bubble.pane.active ? 0.18 : 0.10).setStroke()
+        if isHighlighted(bubble) {
+            NSColor(calibratedRed: 0.15, green: 0.72, blue: 0.38, alpha: 0.34).setStroke()
+        } else {
+            NSColor.black.withAlphaComponent(0.10).setStroke()
+        }
         path.lineWidth = 1
         path.stroke()
 
@@ -1369,7 +1859,7 @@ final class OverlayView: NSView {
         let detail = parts.count > 1 ? parts[1] : ""
         let location = locationLabel(for: bubble.pane)
         let bubbleDensity = Self.density(for: max(1, bubbles.count))
-        drawStatus(in: statusRect, state: runState(for: bubble))
+        drawStatus(in: statusRect, bubble: bubble)
 
         if bubbleDensity == .singleLine {
             drawSingleLineBubbleText(
@@ -1477,9 +1967,20 @@ final class OverlayView: NSView {
         }
     }
 
-    private func drawStatus(in rect: NSRect, state: BubbleRunState) {
+    private func drawStatus(in rect: NSRect, bubble: PaneBubble) {
+        let state = runState(for: bubble)
         let path = NSBezierPath(ovalIn: rect)
         let green = NSColor(calibratedRed: 0.04, green: 0.63, blue: 0.25, alpha: 1)
+        if isAcknowledged(bubble) {
+            green.setFill()
+            path.fill()
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 11, weight: .bold),
+                .foregroundColor: NSColor.white
+            ]
+            NSString(string: "✓").draw(in: rect.insetBy(dx: 3.2, dy: 0.9), withAttributes: attrs)
+            return
+        }
         if state == .running {
             green.withAlphaComponent(0.16).setFill()
             path.fill()
@@ -1498,13 +1999,10 @@ final class OverlayView: NSView {
             spinner.stroke()
             return
         }
-        green.setFill()
-        path.fill()
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: .bold),
-            .foregroundColor: NSColor.white
-        ]
-        NSString(string: "✓").draw(in: rect.insetBy(dx: 3.2, dy: 0.9), withAttributes: attrs)
+
+        green.withAlphaComponent(0.18).setStroke()
+        path.lineWidth = 2.2
+        path.stroke()
     }
 
     private func drawCollapsedBadge() {
@@ -1561,10 +2059,10 @@ final class OverlayView: NSView {
     private func palRect(in bounds: NSRect) -> NSRect {
         let size = palSize
         if !showsBubbleUI {
-            return NSRect(x: Self.padding, y: Self.padding, width: size.width, height: size.height)
+            return NSRect(x: Self.padding + usageRingLabelWidth, y: Self.padding, width: size.width, height: size.height)
         }
         if isCollapsed {
-            return NSRect(x: Self.padding, y: Self.padding, width: size.width, height: size.height)
+            return NSRect(x: Self.padding + usageRingLabelWidth, y: Self.padding, width: size.width, height: size.height)
         }
         let x = bubbleHorizontalSide == .left
             ? bounds.width - Self.expandedEdgePadding - size.width
@@ -1589,6 +2087,14 @@ final class OverlayView: NSView {
 
     private func runState(for bubble: PaneBubble) -> BubbleRunState {
         runStatesByPaneId[bubble.pane.paneId] ?? .complete
+    }
+
+    private func isHighlighted(_ bubble: PaneBubble) -> Bool {
+        highlightedPaneId == bubble.pane.paneId
+    }
+
+    private func isAcknowledged(_ bubble: PaneBubble) -> Bool {
+        acknowledgedPaneIds.contains(bubble.pane.paneId)
     }
 
     private func advanceAnimation() {
@@ -1911,6 +2417,115 @@ struct PalSpriteLoader {
             result[row.state] = frames
         }
         return result
+    }
+
+    func dominantColor() -> NSColor {
+        guard let sheet = NSImage(contentsOf: config.spritesheetURL),
+              let cgImage = sheet.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let context = Self.rgbaContext(width: cgImage.width, height: cgImage.height) else {
+            return UsageRingPalette.defaultBase
+        }
+
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
+        guard let raw = context.data else {
+            return UsageRingPalette.defaultBase
+        }
+        let bytes = raw.bindMemory(to: UInt8.self, capacity: cgImage.width * cgImage.height * 4)
+        let bytesPerPixel = 4
+        let bytesPerRow = context.bytesPerRow
+        let width = cgImage.width
+        let height = cgImage.height
+        var buckets: [String: (red: CGFloat, green: CGFloat, blue: CGFloat, count: Int)] = [:]
+        let step = max(8, min(width, height) / 90)
+
+        for y in stride(from: 0, to: height, by: step) {
+            for x in stride(from: 0, to: width, by: step) {
+                let offset = y * bytesPerRow + x * bytesPerPixel
+                guard bytesPerPixel >= 4 else { continue }
+                let red = CGFloat(bytes[offset]) / 255.0
+                let green = CGFloat(bytes[offset + 1]) / 255.0
+                let blue = CGFloat(bytes[offset + 2]) / 255.0
+                let alpha = CGFloat(bytes[offset + 3]) / 255.0
+                guard alpha > 0.35 else { continue }
+                let maxComponent = max(red, green, blue)
+                let minComponent = min(red, green, blue)
+                let saturation = maxComponent == 0 ? 0 : (maxComponent - minComponent) / maxComponent
+                guard saturation > 0.16, maxComponent > 0.20, maxComponent < 0.96 else { continue }
+                let key = "\(Int(red * 5))-\(Int(green * 5))-\(Int(blue * 5))"
+                let current = buckets[key] ?? (0, 0, 0, 0)
+                buckets[key] = (
+                    current.red + red,
+                    current.green + green,
+                    current.blue + blue,
+                    current.count + 1
+                )
+            }
+        }
+
+        guard let dominant = buckets.values.max(by: { $0.count < $1.count }), dominant.count > 0 else {
+            return UsageRingPalette.defaultBase
+        }
+        return NSColor(
+            calibratedRed: dominant.red / CGFloat(dominant.count),
+            green: dominant.green / CGFloat(dominant.count),
+            blue: dominant.blue / CGFloat(dominant.count),
+            alpha: 1.0
+        )
+    }
+
+    private static func rgbaContext(width: Int, height: Int) -> CGContext? {
+        CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+    }
+}
+
+struct UsageRingPalette {
+    static let defaultBase = NSColor(calibratedRed: 0.18, green: 0.70, blue: 0.58, alpha: 1)
+    static let `default` = UsageRingPalette.derived(from: defaultBase)
+
+    let outer: NSColor
+    let weekly: NSColor
+    let monthly: NSColor
+    let shortTerm: NSColor
+
+    static func derived(from color: NSColor) -> UsageRingPalette {
+        let rgb = color.usingColorSpace(.deviceRGB) ?? defaultBase
+        let hue = rgb.hueComponent
+        let saturation = min(max(rgb.saturationComponent, 0.34), 0.86)
+        let brightness = min(max(rgb.brightnessComponent, 0.40), 0.86)
+        return UsageRingPalette(
+            outer: NSColor(
+                calibratedHue: hue,
+                saturation: min(0.92, max(0.58, saturation * 1.08)),
+                brightness: min(0.70, max(0.50, brightness * 0.72)),
+                alpha: 1.0
+            ),
+            weekly: NSColor(
+                calibratedHue: hue,
+                saturation: min(0.82, max(0.42, saturation * 0.78)),
+                brightness: min(0.88, max(0.66, brightness * 1.08)),
+                alpha: 1.0
+            ),
+            monthly: NSColor(
+                calibratedHue: hue,
+                saturation: min(0.92, max(0.58, saturation * 1.08)),
+                brightness: min(0.70, max(0.50, brightness * 0.72)),
+                alpha: 1.0
+            ),
+            shortTerm: NSColor(
+                calibratedHue: hue,
+                saturation: min(0.64, max(0.30, saturation * 0.52)),
+                brightness: 0.96,
+                alpha: 1.0
+            )
+        )
     }
 }
 

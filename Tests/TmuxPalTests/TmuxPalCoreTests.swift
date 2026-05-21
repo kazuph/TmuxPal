@@ -64,6 +64,42 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertEqual(panes[0].status, .idle)
     }
 
+    func testParsesCodexWeeklyAndMonthlyUsageBuckets() throws {
+        let payload = """
+        {
+          "rate_limit": {
+            "primary_window": {"used_percent": 37, "limit_window_seconds": 604800},
+            "secondary_window": {"used_percent": 12, "limit_window_seconds": 2592000}
+          }
+        }
+        """.data(using: .utf8)!
+
+        let snapshot = try XCTUnwrap(CodexUsageParser.snapshot(from: payload))
+        XCTAssertEqual(snapshot.weekly?.remainingPercent, 63)
+        XCTAssertEqual(snapshot.monthly?.remainingPercent, 88)
+    }
+
+    func testExtractsTextFromHerdrAgentReadJsonEnvelope() {
+        let output = #"{"id":"cli:agent:read","result":{"read":{"format":"text","pane_id":"w1-1","revision":0,"source":"recent_unwrapped","tab_id":"w1:1","text":"Review current diff\nRun swift test"}}}"#
+
+        XCTAssertEqual(TmuxCollector.herdrReadText(from: output), "Review current diff\nRun swift test")
+    }
+
+    func testSummarizerDoesNotShowHerdrCliJsonEnvelope() {
+        let pane = makePane(
+            sessionName: TmuxCollector.herdrSessionName,
+            paneId: "w1-1",
+            command: "codex",
+            transcriptTail: #"{"id":"cli:agent:read","result":{"read":{"text":"ignored"}}}"#,
+            active: false
+        )
+
+        let summary = BubbleSummarizer().summarize(pane, event: nil)
+
+        XCTAssertFalse(summary.contains(#""id":"cli:agent:read""#))
+        XCTAssertEqual(summary, "sample-repo\nrepo")
+    }
+
     func testSummarizesActiveAndTitledPanes() throws {
         let fixture = try String(contentsOfFile: fixturePath("list-panes.txt"), encoding: .utf8)
         let panes = TmuxCollector().parseListPanes(fixture)
@@ -370,7 +406,8 @@ final class TmuxPalCoreTests: XCTestCase {
         paneId: String = "%1",
         command: String,
         transcriptTail: String,
-        tool: AiTool = .codex
+        tool: AiTool = .codex,
+        active: Bool = true
     ) -> TmuxPane {
         TmuxPane(
             sessionName: sessionName,
@@ -383,13 +420,13 @@ final class TmuxPalCoreTests: XCTestCase {
             paneTty: "/dev/ttys001",
             currentCommand: command,
             currentPath: "/workspace/sample-repo",
-            active: true,
+            active: active,
             title: "repo",
             commandLine: command,
             transcriptExcerpt: transcriptTail,
             transcriptTail: transcriptTail,
             tool: tool,
-            status: .selected
+            status: active ? .selected : .idle
         )
     }
 

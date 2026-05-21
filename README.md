@@ -154,6 +154,38 @@ contain `pal.json`. If no characters are found there, the selector falls back to
 file picker. Relative `spritesheetPath` entries are resolved from the selected
 pal directory.
 
+TmuxPal also lists Codex-compatible packages under `${CODEX_HOME:-$HOME/.codex}/pets`
+when they contain `pet.json`. Packages are shown only when the manifest resolves
+to a readable `1536x1872` PNG/WebP atlas with 8 columns and 9 rows of `192x208`
+frames. The status menu shows a small first-frame preview next to each valid pal.
+
+The default animation rows follow the Codex pet convention:
+
+| State | Row | Frames |
+| --- | ---: | ---: |
+| `idle` | 0 | 6 |
+| `running-right` | 1 | 8 |
+| `running-left` | 2 | 8 |
+| `waving` | 3 | 4 |
+| `jumping` | 4 | 5 |
+| `failed` | 5 | 8 |
+| `waiting` | 6 | 6 |
+| `running` | 7 | 6 |
+| `review` | 8 | 6 |
+
+Use the status menu's `パルを探す` submenu to open Petdex or awesome-codex-pet,
+install a pet with their own installer, then choose it from TmuxPal after reload.
+
+`Codex usage rings` draws two ambient C-shaped bars around the pal when Codex
+usage data is available. The C opening points downward and the bar starts from
+the lower-left side. TmuxPal samples the selected pal spritesheet and derives
+ring colors automatically: the outer ring is a darker version of the pal color
+and the inner ring is a brighter version. The outer ring is monthly and the
+inner ring is weekly when the ChatGPT usage endpoint exposes a monthly bucket.
+When monthly is not available, TmuxPal uses weekly outside and the short-window
+bucket inside so the ambient two-ring shape still works without inventing a
+monthly value.
+
 ## License
 
 MIT.

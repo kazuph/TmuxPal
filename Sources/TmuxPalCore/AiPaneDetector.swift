@@ -70,6 +70,7 @@ public struct BubbleSummarizer: Sendable {
         return lower == pane.currentCommand.lowercased()
             || lower == pane.paneId.lowercased()
             || lower == pane.paneId.dropFirst().lowercased()
+            || (lower.contains("\"id\":\"cli:") && lower.contains("\"result\":"))
             || lower == "zsh"
             || lower == "bash"
     }

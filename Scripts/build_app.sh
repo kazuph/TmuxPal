@@ -12,11 +12,11 @@ entitlements_path="$repo_dir/Packaging/TmuxPal.entitlements"
 cd "$repo_dir"
 SWIFTPM_DISABLE_SANDBOX=1 swift build -c release --disable-sandbox
 
-rm -rf "$app_dir"
-mkdir -p "$macos_dir" "$resources_dir"
-cp "$build_dir/tmuxpal" "$macos_dir/TmuxPal"
-cp -R "$repo_dir/Sources/TmuxPal/Resources/." "$resources_dir/"
-cp "$repo_dir/Scripts/tmuxpal-hook.sh" "$resources_dir/tmuxpal-hook.sh"
+/bin/rm -rf "$app_dir"
+/bin/mkdir -p "$macos_dir" "$resources_dir"
+/bin/cp "$build_dir/tmuxpal" "$macos_dir/TmuxPal"
+/bin/cp -R "$repo_dir/Sources/TmuxPal/Resources/." "$resources_dir/"
+/bin/cp "$repo_dir/Scripts/tmuxpal-hook.sh" "$resources_dir/tmuxpal-hook.sh"
 chmod +x "$resources_dir/tmuxpal-hook.sh"
 
 cat > "$contents_dir/Info.plist" <<PLIST

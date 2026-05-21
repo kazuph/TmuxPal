@@ -13,7 +13,8 @@ let package = Package(
         .executableTarget(
             name: "TmuxPal",
             dependencies: ["TmuxPalCore"],
-            resources: [.copy("Resources")]
+            resources: [.copy("Resources")],
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .testTarget(
             name: "TmuxPalTests",
