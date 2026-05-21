@@ -1,51 +1,59 @@
 <p align="center">
-  <img src="Design/IconProposals/tmuxpal-icon.png" width="160" alt="TmuxPal icon">
+  <img src="Design/IconProposals/tmuxpal-icon.png" width="160" alt="TmuxPal app icon">
 </p>
 
 # TmuxPal
 
-macOS native overlay daemon for tmux-based coding AI sessions. It runs
-separately from Codex.app, watches tmux panes for Codex, Claude Code, GitHub
-Copilot CLI, and opencode, then shows Dokochan with stacked status bubbles.
+TmuxPal is a macOS menu bar companion for people who run coding agents inside
+tmux. It watches your tmux server, finds active AI coding panes, and keeps a
+small floating pal on screen with live status bubbles, pane shortcuts, and
+Codex usage rings.
 
-## Features
+It is built as a native AppKit app and runs separately from Codex.app, Claude
+Code, GitHub Copilot CLI, and opencode.
 
-- Floating AppKit overlay with bundled Dokochan assets.
-- Detects all AI panes in tmux, not just the active pane.
-- Shows `tool · repo/window · status · short title` bubbles.
-- Drag the pal to move it; the position is saved in `UserDefaults`.
-- Dragging switches Dokochan to running animations.
-- Bubble click focuses the matching tmux pane.
-- Menu bar app only: no Dock icon and no settings window.
-- Select a custom pal from the menu bar by choosing a folder that contains
-  `pal.json`.
-- Select pal size from the menu bar. The current display size is `Small`; `Medium`
-  and `Large` scale the pal while preserving its screen position.
-- Screenshot mode is available from the menu bar. It swaps in sanitized demo
-  bubbles and can export a transparent PNG set with bubbles and pal-only
-  variants for `Small`, `Medium`, and `Large`.
-- Toggle "Launch at Login" from the menu bar.
-- tmux hooks append lifecycle events to:
-  `~/Library/Application Support/tmuxpal/events.jsonl`.
-- Optional `codex app-server` support is available by launching with
-  `TMUXPAL_ENABLE_APP_SERVER=1`.
+## What It Shows
 
-## Supported Harnesses
+- A draggable floating pal that stays above normal windows.
+- One compact bubble per detected AI pane, including tool, repository/window,
+  status, and a short task title.
+- A menu bar icon that uses the currently selected pal image.
+- Optional Codex usage rings around the pal, including even-spend pace markers.
+- A screenshot mode for exporting clean demo PNGs without exposing real panes.
 
-TmuxPal detects these AI coding TUIs when they are running inside tmux panes:
+Clicking a bubble focuses the matching tmux pane. Dragging the pal moves it and
+saves the position locally.
+
+## Supported Agent TUIs
+
+TmuxPal detects these tools when they are running inside tmux panes:
 
 - Codex CLI: `codex`, including node-backed `bin/codex` launchers.
 - Claude Code: `claude` command, process arguments, or pane titles.
 - GitHub Copilot CLI: `copilot` command, process arguments, or pane titles.
 - opencode: `opencode` command, process arguments, or pane titles.
 
-Detection combines tmux pane metadata, current command, process arguments, and
-pane titles. Polling works without hooks; hooks only improve lifecycle timing
-when installed manually.
+Detection combines tmux pane metadata, current command, process arguments, pane
+titles, and a short cached transcript tail. It works by polling tmux; hooks are
+optional.
 
-## Build And Run
+## Install
 
-Build locally from source:
+Download the latest `TmuxPal-<version>.dmg` or `TmuxPal-<version>.zip` from the
+[GitHub Releases](https://github.com/kazuph/TmuxPal/releases) page, then move
+`TmuxPal.app` to `/Applications` and open it.
+
+Requirements:
+
+- macOS 14 or later.
+- `tmux` installed and running for pane detection.
+- One or more supported agent CLIs running inside tmux.
+
+If macOS blocks an unsigned or non-notarized build, use a local source build or
+trust the downloaded app manually only when you are comfortable with the exact
+artifact you downloaded.
+
+## Build From Source
 
 ```bash
 SWIFTPM_DISABLE_SANDBOX=1 swift test --disable-sandbox
@@ -55,81 +63,38 @@ open ./dist/TmuxPal.app
 
 The app does not require `TMUX_PANE`; it polls the whole tmux server.
 
-## Install From GitHub Release
+## Privacy And Local Data
 
-Download either `TmuxPal-<version>.dmg` or `TmuxPal-<version>.zip` from a
-GitHub Release, then move `TmuxPal.app` to `/Applications` and open it once.
+TmuxPal is local-first:
 
-Release artifacts are Developer ID signed and notarized when these GitHub
-Actions secrets are configured:
+- It reads tmux pane metadata and short pane transcript tails from your local
+  tmux server.
+- It stores app preferences in macOS `UserDefaults`.
+- It stores optional tmux hook lifecycle events in
+  `~/Library/Application Support/tmuxpal/events.jsonl`.
+- It does not send tmux pane contents, titles, repository names, or pal assets
+  to a TmuxPal server.
 
-- `CODESIGN_IDENTITY`
-- `APPLE_DEVELOPER_ID_CERTIFICATE_BASE64`
-- `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD`
-- `APPLE_ID`
-- `APPLE_TEAM_ID`
-- `APPLE_APP_SPECIFIC_PASSWORD`
-- `KEYCHAIN_PASSWORD` (optional)
-
-Without those secrets, local and CI builds fall back to ad-hoc signing and
-macOS Gatekeeper will block the downloaded app.
-
-For a temporary local install from a non-notarized release, move the app to
-`/Applications`, remove the download quarantine attribute, then ad-hoc sign it
-on your Mac:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/TmuxPal.app
-codesign --force --deep --sign - /Applications/TmuxPal.app
-open /Applications/TmuxPal.app
-```
-
-This only trusts the app on your Mac. Public distribution still requires
-Developer ID signing and notarization.
-
-Create a release by pushing a version tag:
-
-```bash
-git tag v0.9.0
-git push origin v0.9.0
-```
-
-GitHub Actions runs tests, builds the app, creates a zip, creates a dmg, writes
-SHA-256 checksums, and attaches all files to the GitHub Release.
-
-## LaunchAgent
-
-Install as a per-user LaunchAgent:
-
-```bash
-./Scripts/install-launch-agent.sh
-```
-
-Remove it:
-
-```bash
-./Scripts/uninstall-launch-agent.sh
-```
-
-This must be a LaunchAgent, not a LaunchDaemon, because the overlay needs the
-logged-in Aqua GUI session.
+Codex usage rings are the only feature that can make a network request. When
+usage rings are enabled and Codex auth is available, TmuxPal reads the local
+`${CODEX_HOME:-$HOME/.codex}/auth.json` access token and calls ChatGPT's usage
+endpoint directly from your Mac. The token is not written into TmuxPal logs or
+sent anywhere else by TmuxPal.
 
 ## tmux Hooks
 
-TmuxPal works without hooks by polling tmux. Install hooks manually if you want
-faster lifecycle event updates:
+TmuxPal works without tmux hooks. Hooks only make pane lifecycle updates more
+immediate.
+
+The app never installs hooks silently on normal launch. Installing or removing
+hooks requires an explicit confirmation dialog or a manual script command:
 
 ```bash
 ./Scripts/install-tmux-hooks.sh
-```
-
-Remove them:
-
-```bash
 ./Scripts/uninstall-tmux-hooks.sh
 ```
 
-The installer only uses hook slot `900` for:
+The installer uses hook slot `900` for:
 
 - `after-new-window`
 - `after-split-window`
@@ -138,56 +103,69 @@ The installer only uses hook slot `900` for:
 - `pane-exited`
 - `pane-died`
 
-It does not overwrite other hook slots.
-The same slot is unset before it is set, so repeated installs are idempotent and
-do not duplicate hooks.
+It unsets only that slot before writing TmuxPal's hook, so repeated installs are
+idempotent and do not overwrite other hook slots.
 
-## Pal Assets
+## Pals
 
-Default assets:
+TmuxPal ships with Dokochan as the default pal.
 
-- bundled `Characters/dokochan/spritesheet.webp`
-- bundled `Characters/dokochan/pal.json`
+The menu bar also lists custom pal directories from:
 
-The menu bar lists pal directories found under `$HOME/.codex/tmuxpal/characters` when they
-contain `pal.json`. If no characters are found there, the selector falls back to a
-file picker. Relative `spritesheetPath` entries are resolved from the selected
-pal directory.
+- `$HOME/.codex/tmuxpal/characters`
+- `${CODEX_HOME:-$HOME/.codex}/pets`
 
-TmuxPal also lists Codex-compatible packages under `${CODEX_HOME:-$HOME/.codex}/pets`
-when they contain `pet.json`. Packages are shown only when the manifest resolves
-to a readable `1536x1872` PNG/WebP atlas with 8 columns and 9 rows of `192x208`
-frames. The status menu shows a small first-frame preview next to each valid pal.
+Character directories must contain a readable manifest (`pal.json` or
+`pet.json`) and a compatible sprite atlas. Codex-compatible pet atlases are
+expected to be `1536x1872` PNG/WebP files with 8 columns and 9 rows of
+`192x208` frames.
 
-The default animation rows follow the Codex pet convention:
+The status menu includes shortcuts to open Petdex and awesome-codex-pet, so you
+can install a pet with its own installer and then reload TmuxPal.
 
-| State | Row | Frames |
-| --- | ---: | ---: |
-| `idle` | 0 | 6 |
-| `running-right` | 1 | 8 |
-| `running-left` | 2 | 8 |
-| `waving` | 3 | 4 |
-| `jumping` | 4 | 5 |
-| `failed` | 5 | 8 |
-| `waiting` | 6 | 6 |
-| `running` | 7 | 6 |
-| `review` | 8 | 6 |
+## Codex Usage Rings
 
-Use the status menu's `Find Pals` submenu to open Petdex or awesome-codex-pet,
-install a pet with their own installer, then choose it from TmuxPal after reload.
+Usage rings draw ambient C-shaped bars around the selected pal when Codex usage
+data is available.
 
-`Codex usage rings` draws two ambient C-shaped bars around the pal when Codex
-usage data is available. The C opening points downward and the bar starts from
-the lower-left side. TmuxPal samples the selected pal spritesheet and derives
-ring colors automatically: the outer ring is a darker version of the pal color
-and the inner ring is a brighter version. The outer ring is monthly and the
-inner ring is weekly when the ChatGPT usage endpoint exposes a monthly bucket.
-When monthly is not available, TmuxPal uses weekly outside and the short-window
-bucket inside so the ambient two-ring shape still works without inventing a
-monthly value. Each visible ring also draws a small pace marker based on the
-bucket reset time and window length. If the ring endpoint passes the marker, the
-current usage is ahead of the even-spend pace; if the marker passes the endpoint,
-usage is behind that pace.
+- The outer ring prefers the monthly bucket.
+- The inner ring prefers the weekly bucket.
+- If monthly usage is unavailable, TmuxPal falls back to weekly plus the
+  short-window bucket instead of inventing a monthly value.
+- Each ring includes a grey 100% track and a small pace marker based on the
+  bucket reset time and window length.
+
+The ring palette is sampled from the selected pal while filtering out likely
+skin and hair tones, so outfit colors are more likely to drive the final ring
+color.
+
+## Launch At Login
+
+Use the menu bar item to toggle Launch at Login.
+
+For source builds, you can also install or remove the development LaunchAgent:
+
+```bash
+./Scripts/install-launch-agent.sh
+./Scripts/uninstall-launch-agent.sh
+```
+
+This must be a LaunchAgent, not a LaunchDaemon, because the overlay needs the
+logged-in Aqua GUI session.
+
+## Releasing
+
+Maintainers create a release by pushing a version tag:
+
+```bash
+git tag v0.9.0
+git push origin v0.9.0
+```
+
+GitHub Actions runs tests, builds the app, creates a zip and dmg, writes
+SHA-256 checksums, and attaches the files to the GitHub Release. When Developer
+ID and notarization secrets are configured, the release workflow signs and
+notarizes the artifacts; otherwise it falls back to ad-hoc signing.
 
 ## License
 
