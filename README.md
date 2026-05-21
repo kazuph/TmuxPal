@@ -90,8 +90,8 @@ Developer ID signing and notarization.
 Create a release by pushing a version tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 GitHub Actions runs tests, builds the app, creates a zip, creates a dmg, writes
@@ -173,7 +173,7 @@ The default animation rows follow the Codex pet convention:
 | `running` | 7 | 6 |
 | `review` | 8 | 6 |
 
-Use the status menu's `パルを探す` submenu to open Petdex or awesome-codex-pet,
+Use the status menu's `Find Pals` submenu to open Petdex or awesome-codex-pet,
 install a pet with their own installer, then choose it from TmuxPal after reload.
 
 `Codex usage rings` draws two ambient C-shaped bars around the pal when Codex

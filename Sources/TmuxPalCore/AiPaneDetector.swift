@@ -30,7 +30,7 @@ public struct BubbleSummarizer: Sendable {
     public func summarize(_ pane: TmuxPane, event: TmuxHookEvent?) -> String {
         let headline = label(for: pane)
         if let event, event.event.contains("exited") || event.event.contains("died") {
-            return "\(headline)\n終了"
+            return "\(headline)\nExited"
         }
 
         let excerpt = clean(pane.transcriptExcerpt)

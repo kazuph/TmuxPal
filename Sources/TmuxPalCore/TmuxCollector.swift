@@ -359,7 +359,7 @@ public struct TmuxCollector: Sendable {
                 }
                 let usefulScalars = line.unicodeScalars.filter { scalar in
                     CharacterSet.alphanumerics.contains(scalar)
-                        || CharacterSet(charactersIn: "ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもやゃゆゅよょらりるれろわをん一-龯").contains(scalar)
+                        || Self.isCJKScalar(scalar)
                 }
                 return usefulScalars.count >= 8
             }
@@ -368,6 +368,12 @@ public struct TmuxCollector: Sendable {
             .split(separator: " ")
             .prefix(28)
             .joined(separator: " ")
+    }
+
+    private static func isCJKScalar(_ scalar: UnicodeScalar) -> Bool {
+        (0x3040...0x30ff).contains(Int(scalar.value))
+            || (0x3400...0x4dbf).contains(Int(scalar.value))
+            || (0x4e00...0x9fff).contains(Int(scalar.value))
     }
 
     public func focus(_ pane: TmuxPane) throws {

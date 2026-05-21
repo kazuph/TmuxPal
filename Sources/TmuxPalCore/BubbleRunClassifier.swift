@@ -48,7 +48,7 @@ public struct BubbleRunClassifier: Sendable {
                 "task complete",
                 "no active agents",
                 "nothing to do",
-                "終了"
+                "exited"
             ]
         )
         if let lastRunning, lastRunning > (lastStopped ?? -1) {

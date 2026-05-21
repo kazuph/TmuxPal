@@ -30,11 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.appServerManager = appServerManager
             appServerManager.startIfAvailable()
         }
-        if ProcessInfo.processInfo.environment["TMUXPAL_AUTO_INSTALL_HOOKS"] == "1" {
-            TmuxHookInstaller.installHooks()
-        }
 
         configureStatusItem()
+        if ProcessInfo.processInfo.environment["TMUXPAL_AUTO_INSTALL_HOOKS"] == "1" {
+            confirmAndInstallTmuxHooks(startup: true)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -51,24 +51,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildStatusMenu() {
         updateStatusButton()
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "表示/非表示", action: #selector(toggleOverlay), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "再読み込み", action: #selector(reloadOverlay), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem(title: "Show/Hide", action: #selector(toggleOverlay), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Reload", action: #selector(reloadOverlay), keyEquivalent: "r"))
         menu.addItem(.separator())
         menu.addItem(palSelectionMenuItem())
         menu.addItem(palSizeMenuItem())
-        menu.addItem(NSMenuItem(title: "デフォルトに戻す", action: #selector(useDefaultPal), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Use Default Pal", action: #selector(useDefaultPal), keyEquivalent: ""))
         menu.addItem(palGalleryMenuItem())
         menu.addItem(screenshotMenuItem())
         menu.addItem(usageRingModeMenuItem())
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "tmux hooks を再インストール", action: #selector(reinstallTmuxHooks), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "tmux hooks を削除", action: #selector(uninstallTmuxHooks), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Install/Update tmux Hooks...", action: #selector(reinstallTmuxHooks), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Remove tmux Hooks...", action: #selector(uninstallTmuxHooks), keyEquivalent: ""))
         menu.addItem(.separator())
-        let loginItem = NSMenuItem(title: "ログイン時に起動", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        let loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.state = LoginItemManager.isEnabled ? .on : .off
         menu.addItem(loginItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "終了", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q"))
         statusItem?.menu = menu
     }
 
@@ -80,12 +80,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func palSelectionMenuItem() -> NSMenuItem {
-        let rootItem = NSMenuItem(title: "パルを選択", action: nil, keyEquivalent: "")
+        let rootItem = NSMenuItem(title: "Choose Pal", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         let palDirectories = PalSettings.discoveredPalDirectories()
 
         if palDirectories.isEmpty {
-            submenu.addItem(NSMenuItem(title: "ファイルから選択...", action: #selector(selectPalFromFile), keyEquivalent: ""))
+            submenu.addItem(NSMenuItem(title: "Choose from File...", action: #selector(selectPalFromFile), keyEquivalent: ""))
         } else {
             for directory in palDirectories {
                 let item = NSMenuItem(
@@ -105,16 +105,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func palGalleryMenuItem() -> NSMenuItem {
-        let rootItem = NSMenuItem(title: "パルを探す", action: nil, keyEquivalent: "")
+        let rootItem = NSMenuItem(title: "Find Pals", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
-        submenu.addItem(NSMenuItem(title: "Petdex を開く", action: #selector(openPetdex), keyEquivalent: ""))
-        submenu.addItem(NSMenuItem(title: "awesome-codex-pet を開く", action: #selector(openAwesomeCodexPet), keyEquivalent: ""))
+        submenu.addItem(NSMenuItem(title: "Open Petdex", action: #selector(openPetdex), keyEquivalent: ""))
+        submenu.addItem(NSMenuItem(title: "Open awesome-codex-pet", action: #selector(openAwesomeCodexPet), keyEquivalent: ""))
         rootItem.submenu = submenu
         return rootItem
     }
 
     private func palSizeMenuItem() -> NSMenuItem {
-        let rootItem = NSMenuItem(title: "サイズ", action: nil, keyEquivalent: "")
+        let rootItem = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
 
         for size in PalDisplaySize.allCases {
@@ -129,12 +129,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func screenshotMenuItem() -> NSMenuItem {
-        let rootItem = NSMenuItem(title: "スクリーンショット", action: nil, keyEquivalent: "")
+        let rootItem = NSMenuItem(title: "Screenshots", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
-        let modeItem = NSMenuItem(title: "スクショモード", action: #selector(toggleScreenshotMode), keyEquivalent: "")
+        let modeItem = NSMenuItem(title: "Screenshot Mode", action: #selector(toggleScreenshotMode), keyEquivalent: "")
         modeItem.state = overlayController?.isScreenshotModeEnabled == true ? .on : .off
         submenu.addItem(modeItem)
-        submenu.addItem(NSMenuItem(title: "PNG一式を書き出し...", action: #selector(exportScreenshotSet), keyEquivalent: ""))
+        submenu.addItem(NSMenuItem(title: "Export PNG Set...", action: #selector(exportScreenshotSet), keyEquivalent: ""))
         rootItem.submenu = submenu
         return rootItem
     }
@@ -172,8 +172,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func selectPalFromFile() {
         let panel = NSOpenPanel()
-        panel.title = "パルを選択"
-        panel.message = "pal.json を含むフォルダ、または pal.json を選択してください。"
+        panel.title = "Choose Pal"
+        panel.message = "Choose a folder containing pal.json, or choose pal.json directly."
         panel.directoryURL = PalSettings.defaultPalPickerDirectory()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
@@ -245,8 +245,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let overlayController else { return }
 
         let panel = NSOpenPanel()
-        panel.title = "スクリーンショット保存先"
-        panel.message = "透過PNGの書き出し先フォルダを選択してください。"
+        panel.title = "Screenshot Export Folder"
+        panel.message = "Choose a folder for transparent PNG exports."
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
@@ -264,15 +264,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func reinstallTmuxHooks() {
-        TmuxHookInstaller.installHooks()
+        confirmAndInstallTmuxHooks(startup: false)
     }
 
     @objc private func uninstallTmuxHooks() {
+        guard confirmTmuxHookRemoval() else { return }
         TmuxHookInstaller.uninstallHooks()
     }
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    private func confirmAndInstallTmuxHooks(startup: Bool) {
+        guard confirmTmuxHookInstall(startup: startup) else { return }
+        TmuxHookInstaller.installHooks()
+    }
+
+    private func confirmTmuxHookInstall(startup: Bool) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = startup ? "Install tmux hooks?" : "Install or update tmux hooks?"
+        alert.informativeText = """
+        TmuxPal can install global tmux hooks to update pane lifecycle state immediately when panes are created, selected, or closed.
+
+        \(TmuxHookInstaller.installExplanation)
+
+        This is optional. You can remove these hooks later from the TmuxPal menu.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Install Hooks")
+        alert.addButton(withTitle: "Not Now")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func confirmTmuxHookRemoval() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Remove tmux hooks?"
+        alert.informativeText = """
+        TmuxPal will remove only its own tmux hooks from slot \(TmuxHookInstaller.hookSlot).
+
+        Pane discovery still works without hooks, but lifecycle updates may be less immediate.
+        """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Remove Hooks")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }
 
@@ -449,9 +485,9 @@ enum PalDisplaySize: String, CaseIterable {
 
     var label: String {
         switch self {
-        case .small: return "小"
-        case .medium: return "中"
-        case .large: return "大"
+        case .small: return "Small"
+        case .medium: return "Medium"
+        case .large: return "Large"
         }
     }
 
@@ -487,6 +523,16 @@ enum TmuxHookInstaller {
         "pane-exited",
         "pane-died"
     ]
+    static var hookSlot: Int {
+        Int(ProcessInfo.processInfo.environment["TMUXPAL_HOOK_SLOT"] ?? "") ?? 900
+    }
+
+    static var installExplanation: String {
+        """
+        It writes tmux global hooks in slot \(hookSlot): \(hookNames.joined(separator: ", ")).
+        Each hook runs tmuxpal-hook.sh and appends a small event record under TmuxPal's app support directory.
+        """
+    }
 
     static func installHooks() {
         guard let tmux = tmuxExecutable() else {
@@ -498,7 +544,7 @@ enum TmuxHookInstaller {
             return
         }
 
-        let slot = hookSlot()
+        let slot = hookSlot
         for hookName in hookNames {
             _ = run(tmux, arguments: ["set-hook", "-gu", "\(hookName)[\(slot)]"])
             let command = "run-shell -b '\"\(script.path)\" \"\(hookName)\" \"#{session_name}\" \"#{window_index}\" \"#{window_id}\" \"#{pane_index}\" \"#{pane_id}\" \"#{pane_current_command}\" \"#{pane_current_path}\" \"#{pane_title}\"'"
@@ -515,15 +561,11 @@ enum TmuxHookInstaller {
             DebugLog.write("tmux hook uninstall skipped: tmux executable not found")
             return
         }
-        let slot = hookSlot()
+        let slot = hookSlot
         for hookName in hookNames {
             _ = run(tmux, arguments: ["set-hook", "-gu", "\(hookName)[\(slot)]"])
         }
         DebugLog.write("tmux hooks removed slot=\(slot)")
-    }
-
-    private static func hookSlot() -> Int {
-        Int(ProcessInfo.processInfo.environment["TMUXPAL_HOOK_SLOT"] ?? "") ?? 900
     }
 
     private static func stableHookScriptURL() -> URL? {
@@ -1268,9 +1310,9 @@ enum UsageRingDisplayMode: String, CaseIterable {
 
     var menuTitle: String {
         switch self {
-        case .off: return "オフ"
-        case .rings: return "リングのみ"
-        case .labeled: return "ラベル付き"
+        case .off: return "Off"
+        case .rings: return "Rings Only"
+        case .labeled: return "With Labels"
         }
     }
 }
@@ -2115,7 +2157,7 @@ final class OverlayView: NSView {
             tool: .codex,
             status: .idle
         )
-        return PaneBubble(pane: pane, summary: "tmux AI pane を待機中")
+        return PaneBubble(pane: pane, summary: "Waiting for tmux AI panes")
     }
 
     private func palRect() -> NSRect {

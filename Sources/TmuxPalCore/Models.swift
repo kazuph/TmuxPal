@@ -24,10 +24,10 @@ public enum PaneStatus: String, Codable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .running: "実行中"
-        case .selected: "選択中"
-        case .exited: "終了"
-        case .idle: "待機"
+        case .running: "Running"
+        case .selected: "Selected"
+        case .exited: "Exited"
+        case .idle: "Idle"
         }
     }
 }
