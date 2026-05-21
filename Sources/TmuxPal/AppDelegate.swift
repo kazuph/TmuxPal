@@ -1703,7 +1703,8 @@ final class OverlayView: NSView {
 
     private func drawUsageRings() {
         guard showsUsageRings, let usageSnapshot else { return }
-        for ring in usageRings(from: usageSnapshot) {
+        let rings = usageRings(from: usageSnapshot)
+        for ring in rings {
             drawUsageRing(
                 center: ring.center,
                 radius: ring.radius,
@@ -1711,9 +1712,11 @@ final class OverlayView: NSView {
                 bucket: ring.bucket,
                 color: ring.color
             )
-            drawUsagePaceMarker(ring: ring, observedAt: usageSnapshot.observedAt)
         }
         clearUsageRingGap()
+        for ring in rings {
+            drawUsagePaceMarker(ring: ring, observedAt: usageSnapshot.observedAt)
+        }
     }
 
     private func drawUsageRingLabels() {
