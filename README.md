@@ -158,8 +158,8 @@ logged-in Aqua GUI session.
 Maintainers create a release by pushing a version tag:
 
 ```bash
-git tag v0.9.0
-git push origin v0.9.0
+git tag v0.9.1
+git push origin v0.9.1
 ```
 
 GitHub Actions runs tests, builds the app, creates a zip and dmg, writes

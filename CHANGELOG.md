@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.9.1
+
+TmuxPal v0.9.1 polishes the repository for public distribution.
+
+### Highlights
+
+- Reworked the README for public users, including install, privacy, tmux hooks,
+  pal assets, and Codex usage-ring behavior.
+- Replaced the app icon with a simpler public-facing icon that keeps Dokochan,
+  tmux panes, and green usage rings visible at small sizes.
+- Added GitHub repository description, homepage, and topics.
+
+### Verification
+
+- `swift test`
+- `Scripts/build_app.sh`
+
 ## v0.9.0
 
 TmuxPal v0.9.0 is the first release shaped for daily use as a polished menu bar app.
