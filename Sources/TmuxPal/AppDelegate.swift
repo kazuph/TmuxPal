@@ -2081,7 +2081,7 @@ final class OverlayView: NSView {
     private func drawStatus(in rect: NSRect, bubble: PaneBubble) {
         let state = runState(for: bubble)
         let path = NSBezierPath(ovalIn: rect)
-        let green = NSColor(calibratedRed: 0.04, green: 0.63, blue: 0.25, alpha: 1)
+        let green = NSColor(calibratedRed: 0.02, green: 0.72, blue: 0.28, alpha: 1)
         if isAcknowledged(bubble) {
             green.setFill()
             path.fill()
@@ -2111,9 +2111,9 @@ final class OverlayView: NSView {
             return
         }
 
-        green.withAlphaComponent(0.18).setStroke()
-        path.lineWidth = 2.2
-        path.stroke()
+        let dotRect = rect.insetBy(dx: 3.5, dy: 3.5)
+        green.setFill()
+        NSBezierPath(ovalIn: dotRect).fill()
     }
 
     private func drawCollapsedBadge() {

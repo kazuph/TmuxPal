@@ -10,9 +10,9 @@ release_dir="$dist_dir/release"
 dmg_root="$release_dir/dmg-root"
 notary_zip_path="$release_dir/TmuxPal-${version}-notary.zip"
 
-rm -rf "$release_dir"
-mkdir -p "$release_dir"
-trap 'rm -rf "$dmg_root"' EXIT
+/bin/rm -rf "$release_dir"
+/bin/mkdir -p "$release_dir"
+trap '/bin/rm -rf "$dmg_root"' EXIT
 
 TMUXPAL_VERSION="$version" "$repo_dir/Scripts/build_app.sh" >/dev/null
 
@@ -41,20 +41,20 @@ if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_
     --wait
   xcrun stapler staple "$app_path"
   spctl -a -vvv "$app_path"
-  rm -f "$notary_zip_path"
+  /bin/rm -f "$notary_zip_path"
 fi
 
 ditto -c -k --keepParent "$app_path" "$zip_path"
-mkdir -p "$dmg_root"
-cp -R "$app_path" "$dmg_root/"
-ln -s /Applications "$dmg_root/Applications"
+/bin/mkdir -p "$dmg_root"
+/bin/cp -R "$app_path" "$dmg_root/"
+/bin/ln -s /Applications "$dmg_root/Applications"
 hdiutil create \
   -volname "TmuxPal" \
   -srcfolder "$dmg_root" \
   -ov \
   -format UDZO \
   "$dmg_path" >/dev/null
-rm -rf "$dmg_root"
+/bin/rm -rf "$dmg_root"
 
 if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${CODESIGN_IDENTITY:-}" ]]; then
   xcrun notarytool submit "$dmg_path" \

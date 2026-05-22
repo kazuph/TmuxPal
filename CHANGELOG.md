@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.2
+
+TmuxPal v0.9.2 refines the human-review status indicator so completed panes are
+noticeable without overwhelming the bubble UI.
+
+### Highlights
+
+- Replaced the faint completed-awaiting ring with a compact solid green dot.
+- Kept acknowledged completed panes visually distinct with the existing check
+  mark indicator.
+
+### Verification
+
+- `swift test`
+- `Scripts/build_app.sh`
+
 ## v0.9.1
 
 TmuxPal v0.9.1 polishes the repository for public distribution.
