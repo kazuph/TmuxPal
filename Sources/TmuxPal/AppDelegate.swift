@@ -2082,16 +2082,6 @@ final class OverlayView: NSView {
         let state = runState(for: bubble)
         let path = NSBezierPath(ovalIn: rect)
         let green = NSColor(calibratedRed: 0.02, green: 0.72, blue: 0.28, alpha: 1)
-        if isAcknowledged(bubble) {
-            green.setFill()
-            path.fill()
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 11, weight: .bold),
-                .foregroundColor: NSColor.white
-            ]
-            NSString(string: "✓").draw(in: rect.insetBy(dx: 3.2, dy: 0.9), withAttributes: attrs)
-            return
-        }
         if state == .running {
             green.withAlphaComponent(0.16).setFill()
             path.fill()
@@ -2108,6 +2098,16 @@ final class OverlayView: NSView {
             spinner.lineWidth = 2.2
             spinner.lineCapStyle = .round
             spinner.stroke()
+            return
+        }
+        if isAcknowledged(bubble) {
+            green.setFill()
+            path.fill()
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 11, weight: .bold),
+                .foregroundColor: NSColor.white
+            ]
+            NSString(string: "✓").draw(in: rect.insetBy(dx: 3.2, dy: 0.9), withAttributes: attrs)
             return
         }
 

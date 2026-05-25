@@ -198,12 +198,9 @@ public struct TmuxCollector: Sendable {
     }
 
     private func herdrStatus(_ status: String, focused: Bool) -> PaneStatus {
-        if focused {
-            return .selected
-        }
         switch status {
         case "idle":
-            return .idle
+            return focused ? .selected : .idle
         case "working", "blocked", "unknown":
             return .running
         default:

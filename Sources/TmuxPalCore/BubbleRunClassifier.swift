@@ -9,6 +9,10 @@ public struct BubbleRunClassifier: Sendable {
     public init() {}
 
     public func classify(_ bubble: PaneBubble) -> BubbleRunState {
+        if bubble.pane.status == .running {
+            return .running
+        }
+
         if let event = bubble.lastEvent?.event, event.contains("exited") || event.contains("died") {
             return .complete
         }

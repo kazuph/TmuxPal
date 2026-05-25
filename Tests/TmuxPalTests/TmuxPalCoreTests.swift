@@ -49,7 +49,7 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertEqual(pane.sessionName, TmuxCollector.herdrSessionName)
         XCTAssertEqual(pane.paneId, "w6523c5b0eb8895-1")
         XCTAssertEqual(pane.currentPath, "/workspace/tmuxpal")
-        XCTAssertEqual(pane.status, .selected)
+        XCTAssertEqual(pane.status, .running)
     }
 
     func testHerdrPaneListIgnoresNonAgentPanes() {
@@ -149,6 +149,33 @@ final class TmuxPalCoreTests: XCTestCase {
         )
 
         XCTAssertEqual(BubbleRunClassifier().classify(bubble), .running)
+    }
+
+    func testClassifiesHerdrWorkingFocusedAgentAsRunningWithoutTranscriptMarker() {
+        let pane = TmuxPane(
+            sessionName: TmuxCollector.herdrSessionName,
+            windowIndex: "w1",
+            windowId: "w1:1",
+            windowName: "w1",
+            paneIndex: "w1-1",
+            paneId: "w1-1",
+            panePid: "",
+            paneTty: "",
+            currentCommand: "codex",
+            currentPath: "/workspace/sample-repo",
+            active: true,
+            title: "working",
+            commandLine: "codex",
+            transcriptExcerpt: "Review current diff",
+            transcriptTail: "Review current diff",
+            tool: .codex,
+            status: .running
+        )
+
+        XCTAssertEqual(
+            BubbleRunClassifier().classify(PaneBubble(pane: pane, summary: "sample-repo\nReview current diff")),
+            .running
+        )
     }
 
     func testClassifiesCodexPromptAsComplete() {
