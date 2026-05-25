@@ -366,7 +366,7 @@ final class TmuxPalCoreTests: XCTestCase {
 
     func testFocusUsesHerdrForHerdrPane() throws {
         let runner = RecordingRunner(outputs: [:])
-        let collector = TmuxCollector(tmuxPath: "tmux", tmuxSocketPath: "/tmp/test", runner: runner)
+        let collector = TmuxCollector(tmuxPath: "tmux", tmuxSocketPath: "/tmp/test", runner: runner, herdrPath: "herdr")
         let pane = makePane(
             sessionName: TmuxCollector.herdrSessionName,
             paneId: "w6523c5b0eb8895-1",
@@ -376,8 +376,31 @@ final class TmuxPalCoreTests: XCTestCase {
 
         try collector.focus(pane)
 
-        XCTAssertTrue(runner.commands.contains(["herdr", "agent", "focus", "w6523c5b0eb8895-1"]))
+        XCTAssertTrue(runner.executables.contains("herdr"))
+        XCTAssertTrue(runner.commands.contains(["agent", "focus", "w6523c5b0eb8895-1"]))
         XCTAssertFalse(runner.commands.contains { $0.contains("select-pane") })
+    }
+
+    func testCollectUsesInjectedHerdrExecutable() throws {
+        let output = """
+        {"id":"cli:agent:list","result":{"agents":[{"agent":"codex","agent_status":"working","cwd":"/workspace/tmuxpal","focused":true,"pane_id":"w1-1","revision":0,"tab_id":"w1:1","terminal_id":"term_1","workspace_id":"w1"}],"type":"agent_list"}}
+        """
+        let runner = RecordingRunner(outputs: [
+            "list-panes": "",
+            "agent": output
+        ])
+        let collector = TmuxCollector(
+            tmuxPath: "tmux",
+            tmuxSocketPath: "/tmp/test",
+            runner: runner,
+            herdrPath: "/Users/example/.local/bin/herdr"
+        )
+
+        let panes = try collector.collect()
+
+        XCTAssertEqual(panes.count, 1)
+        XCTAssertEqual(panes[0].sessionName, TmuxCollector.herdrSessionName)
+        XCTAssertTrue(runner.executables.contains("/Users/example/.local/bin/herdr"))
     }
 
     func testCollectDoesNotInspectPlainShellPaneProcessList() throws {
@@ -468,11 +491,18 @@ final class RecordingRunner: CommandRunning, @unchecked Sendable {
     private let outputs: [String: String]
     private let lock = NSLock()
     private var recordedCommands: [[String]] = []
+    private var recordedExecutables: [String] = []
 
     var commands: [[String]] {
         lock.lock()
         defer { lock.unlock() }
         return recordedCommands
+    }
+
+    var executables: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedExecutables
     }
 
     init(outputs: [String: String]) {
@@ -481,6 +511,7 @@ final class RecordingRunner: CommandRunning, @unchecked Sendable {
 
     func run(_ executable: String, _ arguments: [String]) throws -> String {
         lock.lock()
+        recordedExecutables.append(executable)
         recordedCommands.append(arguments)
         lock.unlock()
         for (needle, output) in outputs where arguments.contains(needle) {

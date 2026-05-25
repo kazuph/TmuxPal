@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9.3
+
+TmuxPal v0.9.3 fixes herdr agent discovery when the menu bar app is launched
+from Finder or Launch Services without a shell PATH.
+
+### Highlights
+
+- Resolve the herdr executable from `TMUXPAL_HERDR_PATH`, the current PATH, and
+  common local install paths such as `~/.local/bin/herdr`.
+- Keep herdr-only workflows visible even when tmux is not currently running.
+
+### Verification
+
+- `swift test`
+- `env -i HOME="$HOME" USER="$USER" PATH="/usr/bin:/bin" .build/debug/tmuxpal --dump-panes`
+- `/Applications/TmuxPal.app/Contents/MacOS/TmuxPal --dump-panes`
+- Manual dogfooding of `/Applications/TmuxPal.app` with herdr agents visible
+
 ## v0.9.2
 
 TmuxPal v0.9.2 refines the human-review status indicator so completed panes are

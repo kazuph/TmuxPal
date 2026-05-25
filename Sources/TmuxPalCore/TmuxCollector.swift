@@ -69,6 +69,7 @@ public struct TmuxCollector: Sendable {
     private let tmuxSocketPath: String?
     private let runner: CommandRunning
     private let detector: AiPaneDetector
+    private let herdrPath: String?
     private let transcriptCache: LockedTranscriptCache
     private let inactiveTranscriptCacheTTL: TimeInterval
     private let activeTranscriptCacheTTL: TimeInterval
@@ -78,6 +79,7 @@ public struct TmuxCollector: Sendable {
         tmuxSocketPath: String? = nil,
         runner: CommandRunning = ProcessCommandRunner(),
         detector: AiPaneDetector = AiPaneDetector(),
+        herdrPath: String? = nil,
         transcriptCacheTTL: TimeInterval = 12,
         activeTranscriptCacheTTL: TimeInterval = 4.5
     ) {
@@ -85,6 +87,7 @@ public struct TmuxCollector: Sendable {
         self.tmuxSocketPath = tmuxSocketPath ?? Self.defaultSocketPath()
         self.runner = runner
         self.detector = detector
+        self.herdrPath = herdrPath ?? Self.defaultHerdrPath()
         self.inactiveTranscriptCacheTTL = transcriptCacheTTL
         self.activeTranscriptCacheTTL = activeTranscriptCacheTTL
         self.transcriptCache = LockedTranscriptCache()
@@ -430,7 +433,10 @@ public struct TmuxCollector: Sendable {
     }
 
     private func runHerdr(_ arguments: [String]) throws -> String {
-        try runner.run("/usr/bin/env", ["herdr"] + arguments)
+        guard let herdrPath else {
+            throw TmuxCollectorError.commandFailed("herdr executable not found")
+        }
+        return try runner.run(herdrPath, arguments)
     }
 
     private func isHerdrPaneId(_ paneId: String) -> Bool {
@@ -447,6 +453,27 @@ public struct TmuxCollector: Sendable {
             return path
         }
         return nil
+    }
+
+    private static func defaultHerdrPath() -> String? {
+        let fileManager = FileManager.default
+        if let explicit = ProcessInfo.processInfo.environment["TMUXPAL_HERDR_PATH"],
+           fileManager.isExecutableFile(atPath: explicit) {
+            return explicit
+        }
+
+        let pathCandidates = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map { URL(fileURLWithPath: String($0)).appendingPathComponent("herdr").path }
+        let commonCandidates = [
+            fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/herdr").path,
+            "/opt/homebrew/bin/herdr",
+            "/usr/local/bin/herdr",
+            "/usr/bin/herdr"
+        ]
+
+        return (pathCandidates + commonCandidates)
+            .first { fileManager.isExecutableFile(atPath: $0) }
     }
 }
 
