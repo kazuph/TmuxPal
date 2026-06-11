@@ -7,7 +7,7 @@
 TmuxPal is a macOS menu bar companion for people who run coding agents inside
 tmux. It watches your tmux server, finds active AI coding panes, and keeps a
 small floating pal on screen with live status bubbles, pane shortcuts, and
-Codex usage rings.
+Codex and Claude Code usage rings.
 
 It is built as a native AppKit app and runs separately from Codex.app, Claude
 Code, GitHub Copilot CLI, and opencode.
@@ -18,7 +18,9 @@ Code, GitHub Copilot CLI, and opencode.
 - One compact bubble per detected AI pane, including tool, repository/window,
   status, and a short task title.
 - A menu bar icon that uses the currently selected pal image.
-- Optional Codex usage rings around the pal, including even-spend pace markers.
+- Optional Codex and Claude Code usage rings around the pal, including
+  even-spend pace markers (Claude rings outside in coral, Codex rings inside in
+  pal-derived colors).
 - A screenshot mode for exporting clean demo PNGs without exposing real panes.
 
 Clicking a bubble focuses the matching tmux pane. Dragging the pal moves it and
@@ -131,11 +133,18 @@ TmuxPal is local-first:
 - It does not send tmux pane contents, titles, repository names, or pal assets
   to a TmuxPal server.
 
-Codex usage rings are the only feature that can make a network request. When
-usage rings are enabled and Codex auth is available, TmuxPal reads the local
-`${CODEX_HOME:-$HOME/.codex}/auth.json` access token and calls ChatGPT's usage
-endpoint directly from your Mac. The token is not written into TmuxPal logs or
-sent anywhere else by TmuxPal.
+Usage rings are the only feature that can make network requests:
+
+- Codex rings: when usage rings are enabled and Codex auth is available,
+  TmuxPal reads the local `${CODEX_HOME:-$HOME/.codex}/auth.json` access token
+  and calls ChatGPT's usage endpoint directly from your Mac.
+- Claude rings: TmuxPal first looks for a local statusline cache file and makes
+  no network request at all when it is present. Only when the cache is missing
+  or stale does it read the Claude Code OAuth token (from
+  `~/.claude/.credentials.json` or the macOS keychain) and call Anthropic's
+  usage endpoint directly from your Mac.
+
+Tokens are not written into TmuxPal logs or sent anywhere else by TmuxPal.
 
 ## tmux Hooks
 
@@ -179,21 +188,62 @@ expected to be `1536x1872` PNG/WebP files with 8 columns and 9 rows of
 The status menu includes shortcuts to open Petdex and awesome-codex-pet, so you
 can install a pet with its own installer and then reload TmuxPal.
 
-## Codex Usage Rings
+## Usage Rings (Codex & Claude)
 
-Usage rings draw ambient C-shaped bars around the selected pal when Codex usage
-data is available.
+Usage rings draw ambient C-shaped bars around the selected pal when usage data
+is available. Rings stack dynamically: Claude Code rings sit on the outside in
+Anthropic coral, Codex rings sit on the inside.
 
-- The outer ring prefers the monthly bucket.
-- The inner ring prefers the weekly bucket.
-- If monthly usage is unavailable, TmuxPal falls back to weekly plus the
-  short-window bucket instead of inventing a monthly value.
+- Claude rings show the 5-hour and 7-day (weekly) rate-limit windows.
+- Codex rings prefer monthly, then weekly, then the short window, without
+  inventing values for missing buckets.
 - Each ring includes a grey 100% track and a small pace marker based on the
   bucket reset time and window length.
 
-The ring palette is sampled from the selected pal while filtering out likely
-skin and hair tones, so outfit colors are more likely to drive the final ring
-color.
+The Codex ring palette is sampled from the selected pal while filtering out
+likely skin and hair tones, so outfit colors are more likely to drive the final
+ring color.
+
+### Claude Usage Data Sources
+
+Claude rings resolve data in this order:
+
+1. **Statusline cache (recommended).** A file containing the `rate_limits`
+   JSON that Claude Code (v2.1.80+) passes to statusline scripts on stdin.
+   Default path: `~/.claude/cache/statusline-rate-limits.json`, overridable
+   with the `TMUXPAL_CLAUDE_USAGE_CACHE` environment variable. Files older
+   than 24 hours are ignored. `CLAUDE_CONFIG_DIR` is honored when set.
+2. **OAuth usage endpoint (fallback).** When no fresh cache exists, TmuxPal
+   reads the Claude Code OAuth token from `~/.claude/.credentials.json` or the
+   macOS keychain item `Claude Code-credentials` (this may show a one-time
+   keychain permission prompt) and queries
+   `https://api.anthropic.com/api/oauth/usage`. The endpoint rate limits
+   aggressively, so TmuxPal polls it at most every 5 minutes and backs off for
+   15 minutes after failures.
+
+The cache route needs no keychain access and no network requests. To enable
+it, make your Claude Code statusline script persist the `rate_limits` it
+receives. If you do not have a statusline yet, this minimal script is enough:
+
+```bash
+#!/bin/bash
+# ~/.claude/statusline.sh — register in ~/.claude/settings.json as:
+#   "statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}
+input=$(cat)
+
+cache="$HOME/.claude/cache/statusline-rate-limits.json"
+if echo "$input" | jq -e '.rate_limits.five_hour // .rate_limits.seven_day' >/dev/null 2>&1; then
+  mkdir -p "${cache%/*}"
+  echo "$input" | jq -c '{rate_limits}' > "${cache}.tmp.$$" && mv -f "${cache}.tmp.$$" "$cache"
+fi
+
+# Keep whatever statusline output you like:
+echo "$input" | jq -r '.model.display_name'
+```
+
+If you already have a statusline, just add the `cache=` block to it. Note that
+Claude Code only reports `rate_limits` for Claude Pro/Max subscriptions; API
+key logins have no rate-limit windows, so Claude rings stay hidden.
 
 ## Launch At Login
 

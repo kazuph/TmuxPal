@@ -95,6 +95,54 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertEqual(bucket.paceRemainingPercent(at: Date(timeIntervalSince1970: 20_000)), 0)
     }
 
+    func testParsesClaudeStatuslineRateLimitsCache() throws {
+        let payload = """
+        {
+          "rate_limits": {
+            "five_hour": {"used_percentage": 24, "resets_at": 1781156400},
+            "seven_day": {"used_percentage": 5, "resets_at": 1781553600}
+          }
+        }
+        """.data(using: .utf8)!
+
+        let observedAt = Date(timeIntervalSince1970: 1_781_147_400)
+        let snapshot = try XCTUnwrap(ClaudeUsageParser.snapshot(from: payload, observedAt: observedAt))
+        let fiveHour = try XCTUnwrap(snapshot.fiveHour)
+        XCTAssertEqual(fiveHour.label, "5h")
+        XCTAssertEqual(fiveHour.remainingPercent, 76)
+        XCTAssertEqual(fiveHour.windowSeconds, 5 * 60 * 60)
+        let fiveHourPace = try XCTUnwrap(fiveHour.paceRemainingPercent(at: observedAt))
+        XCTAssertEqual(fiveHourPace, 50, accuracy: 0.0001)
+        let sevenDay = try XCTUnwrap(snapshot.sevenDay)
+        XCTAssertEqual(sevenDay.label, "W")
+        XCTAssertEqual(sevenDay.remainingPercent, 95)
+        XCTAssertEqual(sevenDay.windowSeconds, 7 * 24 * 60 * 60)
+    }
+
+    func testParsesClaudeUtilizationFractionAndIsoResetTimestamp() throws {
+        let payload = """
+        {
+          "rate_limits": {
+            "five_hour": {"utilization": 0.4, "resets_at": "1970-01-01T05:00:00Z"},
+            "seven_day": {"utilization": 62}
+          }
+        }
+        """.data(using: .utf8)!
+
+        let snapshot = try XCTUnwrap(ClaudeUsageParser.snapshot(from: payload, observedAt: Date(timeIntervalSince1970: 0)))
+        let fiveHour = try XCTUnwrap(snapshot.fiveHour)
+        XCTAssertEqual(fiveHour.usedPercent, 40)
+        XCTAssertEqual(fiveHour.resetAt, 5 * 60 * 60)
+        XCTAssertEqual(fiveHour.paceRemainingPercent(at: snapshot.observedAt), 100)
+        XCTAssertEqual(snapshot.sevenDay?.usedPercent, 62)
+        XCTAssertNil(snapshot.sevenDay?.resetAt)
+    }
+
+    func testClaudeUsageParserReturnsNilWithoutBuckets() {
+        let payload = "{\"rate_limits\": {}}".data(using: .utf8)!
+        XCTAssertNil(ClaudeUsageParser.snapshot(from: payload))
+    }
+
     func testExtractsTextFromHerdrAgentReadJsonEnvelope() {
         let output = #"{"id":"cli:agent:read","result":{"read":{"format":"text","pane_id":"w1-1","revision":0,"source":"recent_unwrapped","tab_id":"w1:1","text":"Review current diff\nRun swift test"}}}"#
 

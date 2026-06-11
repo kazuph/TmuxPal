@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Security
 import ServiceManagement
 import SQLite3
 import TmuxPalCore
@@ -793,6 +794,151 @@ struct CodexUsageReader {
     }
 }
 
+/// Reads Claude Code rate limits. Preferred source is a statusline cache file
+/// (see README: a Claude Code statusline script that dumps the `rate_limits`
+/// JSON it receives on stdin) because it needs no keychain access and never
+/// hits the network. When the cache is absent or stale it falls back to
+/// api.anthropic.com/api/oauth/usage with the Claude Code OAuth token from
+/// ~/.claude/.credentials.json or the macOS keychain. The live endpoint rate
+/// limits aggressively, so fetches are throttled and failures back off.
+actor ClaudeUsageReader {
+    static let maxCacheAge: TimeInterval = 24 * 60 * 60
+    static let liveFetchInterval: TimeInterval = 5 * 60
+    static let liveFailureBackoff: TimeInterval = 15 * 60
+    static let keychainService = "Claude Code-credentials"
+
+    private let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+
+    private var claudeHome: URL {
+        if let configDir = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"],
+           !configDir.isEmpty {
+            return URL(fileURLWithPath: (configDir as NSString).expandingTildeInPath)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
+    }
+    private var lastLiveSnapshot: ClaudeUsageSnapshot?
+    private var lastLiveAttempt: Date?
+    private var liveRetryInterval: TimeInterval = 0
+
+    func readLatest() async -> ClaudeUsageSnapshot? {
+        if let cached = readStatuslineCache() {
+            return cached
+        }
+        return await readLiveUsage()
+    }
+
+    private var cacheURL: URL {
+        if let override = ProcessInfo.processInfo.environment["TMUXPAL_CLAUDE_USAGE_CACHE"],
+           !override.isEmpty {
+            return URL(fileURLWithPath: (override as NSString).expandingTildeInPath)
+        }
+        return claudeHome.appendingPathComponent("cache/statusline-rate-limits.json")
+    }
+
+    private func readStatuslineCache() -> ClaudeUsageSnapshot? {
+        let url = cacheURL
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let modifiedAt = attributes[.modificationDate] as? Date,
+              Date().timeIntervalSince(modifiedAt) <= Self.maxCacheAge,
+              let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        return ClaudeUsageParser.snapshot(from: data, source: "statusline-cache")
+    }
+
+    private func readLiveUsage() async -> ClaudeUsageSnapshot? {
+        let now = Date()
+        if let lastLiveAttempt, now.timeIntervalSince(lastLiveAttempt) < liveRetryInterval {
+            return freshEnough(lastLiveSnapshot)
+        }
+        lastLiveAttempt = now
+        guard let token = accessToken() else {
+            DebugLog.write("claude usage: no oauth token available; skipping live fetch")
+            liveRetryInterval = Self.liveFailureBackoff
+            return freshEnough(lastLiveSnapshot)
+        }
+        var request = URLRequest(url: usageURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 6
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        // Without a claude-code user agent this endpoint serves a far stricter
+        // 429 bucket, which makes polling unusable.
+        request.setValue("claude-code/2.1.80", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else {
+            DebugLog.write("claude usage: live fetch failed (network)")
+            liveRetryInterval = Self.liveFailureBackoff
+            return freshEnough(lastLiveSnapshot)
+        }
+        guard (200..<300).contains(http.statusCode),
+              let snapshot = ClaudeUsageParser.snapshot(from: data, source: "live") else {
+            DebugLog.write("claude usage: live fetch failed status=\(http.statusCode)")
+            liveRetryInterval = Self.liveFailureBackoff
+            return freshEnough(lastLiveSnapshot)
+        }
+        DebugLog.write("claude usage: live fetch ok")
+        liveRetryInterval = Self.liveFetchInterval
+        lastLiveSnapshot = snapshot
+        return snapshot
+    }
+
+    private func freshEnough(_ snapshot: ClaudeUsageSnapshot?) -> ClaudeUsageSnapshot? {
+        guard let snapshot,
+              Date().timeIntervalSince(snapshot.observedAt) <= Self.maxCacheAge else {
+            return nil
+        }
+        return snapshot
+    }
+
+    private func accessToken() -> String? {
+        if let token = credentialsFileToken() {
+            return token
+        }
+        return keychainToken()
+    }
+
+    private func credentialsFileToken() -> String? {
+        let url = claudeHome.appendingPathComponent(".credentials.json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return oauthToken(from: data)
+    }
+
+    private func keychainToken() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.keychainService,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess, let data = item as? Data else {
+            DebugLog.write("claude usage: keychain lookup failed status=\(status)")
+            return nil
+        }
+        return oauthToken(from: data)
+    }
+
+    private func oauthToken(from data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = object["claudeAiOauth"] as? [String: Any],
+              let token = oauth["accessToken"] as? String,
+              !token.isEmpty else {
+            return nil
+        }
+        if let expiresAt = oauth["expiresAt"] as? Double {
+            let expirySeconds = expiresAt > 10_000_000_000 ? expiresAt / 1000.0 : expiresAt
+            guard expirySeconds > Date().timeIntervalSince1970 + 60 else {
+                DebugLog.write("claude usage: oauth token expired; waiting for claude code to refresh it")
+                return nil
+            }
+        }
+        return token
+    }
+}
+
 @MainActor
 final class OverlayController {
     private let window: OverlayPanel
@@ -807,6 +953,7 @@ final class OverlayController {
     private var screenshotModeEnabled = false
     private var usageTimer: Timer?
     private let codexUsageReader = CodexUsageReader()
+    private let claudeUsageReader = ClaudeUsageReader()
 
     init() {
         overlayView = OverlayView(palAssetConfig: PalSettings.assetConfig())
@@ -1050,13 +1197,19 @@ final class OverlayController {
     private func reloadUsage() async {
         guard overlayView.showsUsageRings else {
             overlayView.setUsageSnapshot(nil)
+            overlayView.setClaudeUsageSnapshot(nil)
             return
         }
-        let reader = codexUsageReader
-        let snapshot = await Task.detached(priority: .utility) {
-            await reader.readLatest()
+        let codexReader = codexUsageReader
+        let claudeReader = claudeUsageReader
+        async let codexSnapshot = Task.detached(priority: .utility) {
+            await codexReader.readLatest()
         }.value
-        overlayView.setUsageSnapshot(snapshot)
+        async let claudeSnapshot = Task.detached(priority: .utility) {
+            await claudeReader.readLatest()
+        }.value
+        overlayView.setUsageSnapshot(await codexSnapshot)
+        overlayView.setClaudeUsageSnapshot(await claudeSnapshot)
         if let snapshotPath = ProcessInfo.processInfo.environment["TMUXPAL_SNAPSHOT_PATH"] {
             overlayView.writeSnapshot(to: URL(fileURLWithPath: snapshotPath))
         }
@@ -1375,7 +1528,9 @@ final class OverlayView: NSView {
         usageRingMode != .off
     }
     private var usageSnapshot: CodexUsageSnapshot?
+    private var claudeUsageSnapshot: ClaudeUsageSnapshot?
     private var usageRingPalette = UsageRingPalette.default
+    private let claudeRingPalette = UsageRingPalette.derived(from: UsageRingPalette.claudeBase)
 
     init(frame frameRect: NSRect = .zero, palAssetConfig: PalAssetConfig) {
         self.palAssetConfig = palAssetConfig
@@ -1578,6 +1733,11 @@ final class OverlayView: NSView {
         needsDisplay = true
     }
 
+    func setClaudeUsageSnapshot(_ snapshot: ClaudeUsageSnapshot?) {
+        claudeUsageSnapshot = snapshot?.hasVisibleBuckets == true ? snapshot : nil
+        needsDisplay = true
+    }
+
     func setBubbles(_ bubbles: [PaneBubble]) {
         self.bubbles = bubbles.sorted { lhs, rhs in
             let leftSessionRank = lhs.pane.sessionName == "0" ? 0 : 1
@@ -1702,8 +1862,9 @@ final class OverlayView: NSView {
     }
 
     private func drawUsageRings() {
-        guard showsUsageRings, let usageSnapshot else { return }
-        let rings = usageRings(from: usageSnapshot)
+        guard showsUsageRings else { return }
+        let rings = usageRings()
+        guard !rings.isEmpty else { return }
         for ring in rings {
             drawUsageRing(
                 center: ring.center,
@@ -1713,16 +1874,15 @@ final class OverlayView: NSView {
                 color: ring.color
             )
         }
-        clearUsageRingGap()
+        clearUsageRingGap(rings: rings)
         for ring in rings {
-            drawUsagePaceMarker(ring: ring, observedAt: usageSnapshot.observedAt)
+            drawUsagePaceMarker(ring: ring)
         }
     }
 
     private func drawUsageRingLabels() {
-        guard usageRingMode == .labeled, showsUsageRings, let usageSnapshot else { return }
-        let rings = usageRings(from: usageSnapshot)
-        for ring in rings {
+        guard usageRingMode == .labeled, showsUsageRings else { return }
+        for ring in usageRings() {
             drawUsageRingTag(ring.label, bucket: ring.bucket, center: ring.center, radius: ring.radius, color: ring.color, yOffset: ring.labelYOffset)
             drawUsageRingEndDot(center: ring.center, radius: ring.radius, lineWidth: ring.lineWidth, bucket: ring.bucket, color: ring.color)
         }
@@ -1732,51 +1892,90 @@ final class OverlayView: NSView {
         let label: String
         let bucket: CodexUsageBucket
         let color: NSColor
+        let observedAt: Date
         let center: CGPoint
         let radius: CGFloat
         let lineWidth: CGFloat
         let labelYOffset: CGFloat
     }
 
-    private func usageRings(from usageSnapshot: CodexUsageSnapshot) -> [DrawableUsageRing] {
+    private struct UsageRingSpec {
+        let label: String
+        let bucket: CodexUsageBucket
+        let color: NSColor
+        let observedAt: Date
+    }
+
+    /// Claude rings sit on the outside, Codex rings on the inside.
+    private func usageRingSpecs() -> [UsageRingSpec] {
+        var specs: [UsageRingSpec] = []
+        if let claudeUsageSnapshot {
+            if let sevenDay = claudeUsageSnapshot.sevenDay {
+                specs.append(UsageRingSpec(
+                    label: sevenDay.label,
+                    bucket: sevenDay,
+                    color: claudeRingPalette.weekly,
+                    observedAt: claudeUsageSnapshot.observedAt
+                ))
+            }
+            if let fiveHour = claudeUsageSnapshot.fiveHour {
+                specs.append(UsageRingSpec(
+                    label: fiveHour.label,
+                    bucket: fiveHour,
+                    color: claudeRingPalette.shortTerm,
+                    observedAt: claudeUsageSnapshot.observedAt
+                ))
+            }
+        }
+        if let usageSnapshot {
+            if let monthly = usageSnapshot.monthly {
+                specs.append(UsageRingSpec(
+                    label: "M",
+                    bucket: monthly,
+                    color: usageRingPalette.monthly,
+                    observedAt: usageSnapshot.observedAt
+                ))
+            }
+            if let weekly = usageSnapshot.weekly {
+                specs.append(UsageRingSpec(
+                    label: "W",
+                    bucket: weekly,
+                    color: usageRingPalette.weekly,
+                    observedAt: usageSnapshot.observedAt
+                ))
+            }
+            if let shortTerm = usageSnapshot.shortTerm {
+                specs.append(UsageRingSpec(
+                    label: shortTerm.label,
+                    bucket: shortTerm,
+                    color: usageRingPalette.shortTerm,
+                    observedAt: usageSnapshot.observedAt
+                ))
+            }
+        }
+        return specs
+    }
+
+    private func usageRings() -> [DrawableUsageRing] {
+        let specs = usageRingSpecs()
+        guard !specs.isEmpty else { return [] }
         let rect = palRect()
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let baseRadius = min(rect.width, rect.height) / 2
-        var rings: [DrawableUsageRing] = []
-        if let monthly = usageSnapshot.monthly {
-            rings.append(DrawableUsageRing(
-                label: "M",
-                bucket: monthly,
-                color: usageRingPalette.monthly,
+        let count = CGFloat(specs.count)
+        return specs.enumerated().map { index, spec in
+            let depth = CGFloat(index)
+            return DrawableUsageRing(
+                label: spec.label,
+                bucket: spec.bucket,
+                color: spec.color,
+                observedAt: spec.observedAt,
                 center: center,
-                radius: baseRadius - 0.5,
-                lineWidth: 4.0,
-                labelYOffset: 17
-            ))
+                radius: baseRadius - 0.5 - 5.5 * depth,
+                lineWidth: max(2.6, 3.8 - 0.3 * depth),
+                labelYOffset: 14.0 * (count / 2 - depth - 0.5)
+            )
         }
-        if let weekly = usageSnapshot.weekly {
-            rings.append(DrawableUsageRing(
-                label: "W",
-                bucket: weekly,
-                color: usageRingPalette.weekly,
-                center: center,
-                radius: baseRadius - 7.0,
-                lineWidth: 3.4,
-                labelYOffset: 3
-            ))
-        }
-        if let shortTerm = usageSnapshot.shortTerm {
-            rings.append(DrawableUsageRing(
-                label: shortTerm.label,
-                bucket: shortTerm,
-                color: usageRingPalette.shortTerm,
-                center: center,
-                radius: baseRadius - 13.0,
-                lineWidth: 3.0,
-                labelYOffset: -11
-            ))
-        }
-        return rings
     }
 
     private func drawUsageRing(center: CGPoint, radius: CGFloat, lineWidth: CGFloat, bucket: CodexUsageBucket, color: NSColor) {
@@ -1813,8 +2012,8 @@ final class OverlayView: NSView {
         track.stroke()
     }
 
-    private func drawUsagePaceMarker(ring: DrawableUsageRing, observedAt: Date) {
-        guard let paceRemaining = ring.bucket.paceRemainingPercent(at: observedAt) else { return }
+    private func drawUsagePaceMarker(ring: DrawableUsageRing) {
+        guard let paceRemaining = ring.bucket.paceRemainingPercent(at: ring.observedAt) else { return }
         let angle = usageRingAngle(forRemainingPercent: paceRemaining)
         let innerRadius = ring.radius - ring.lineWidth * 0.78
         let outerRadius = ring.radius + ring.lineWidth * 0.78
@@ -1848,21 +2047,14 @@ final class OverlayView: NSView {
         return (247.5 - 315 * CGFloat(clamped / 100.0)) * .pi / 180.0
     }
 
-    private func clearUsageRingGap() {
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-        let rect = palRect()
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let baseRadius = min(rect.width, rect.height) / 2
+    private func clearUsageRingGap(rings: [DrawableUsageRing]) {
+        guard let context = NSGraphicsContext.current?.cgContext, !rings.isEmpty else { return }
         context.saveGState()
         context.setBlendMode(.clear)
-        for (radius, lineWidth) in [
-            (baseRadius - 0.5, CGFloat(7.5)),
-            (baseRadius - 7.0, CGFloat(7.0)),
-            (baseRadius - 13.0, CGFloat(6.5))
-        ] {
+        for ring in rings {
             let gap = NSBezierPath()
-            gap.appendArc(withCenter: center, radius: radius, startAngle: 247.5, endAngle: 292.5, clockwise: false)
-            gap.lineWidth = lineWidth
+            gap.appendArc(withCenter: ring.center, radius: ring.radius, startAngle: 247.5, endAngle: 292.5, clockwise: false)
+            gap.lineWidth = ring.lineWidth + 3.5
             gap.lineCapStyle = .butt
             gap.stroke()
         }
@@ -2649,6 +2841,9 @@ struct PalSpriteLoader {
 
 struct UsageRingPalette {
     static let defaultBase = NSColor(calibratedRed: 0.18, green: 0.70, blue: 0.58, alpha: 1)
+    // Anthropic brand coral (#D97757) so Claude rings read distinctly from
+    // the pal-derived Codex rings.
+    static let claudeBase = NSColor(calibratedRed: 0.85, green: 0.47, blue: 0.34, alpha: 1)
     static let `default` = UsageRingPalette.derived(from: defaultBase)
 
     let outer: NSColor
