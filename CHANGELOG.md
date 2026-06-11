@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.9.4
+
+TmuxPal v0.9.4 adds Claude Code usage rings alongside the existing Codex
+rings.
+
+### Highlights
+
+- Added Claude Code usage rings: two coral rings (5-hour and weekly windows)
+  drawn outside the existing Codex rings, with the same remaining-percent
+  labels and even-spend pace markers.
+- Claude usage prefers a local statusline cache
+  (`~/.claude/cache/statusline-rate-limits.json`, overridable with
+  `TMUXPAL_CLAUDE_USAGE_CACHE`; see README for a statusline snippet) and falls
+  back to Anthropic's OAuth usage endpoint with throttled polling.
+- Usage ring layout is now dynamic, so any mix of Claude and Codex buckets
+  stacks without overlapping.
+
+### Verification
+
+- `swift test`
+- `Scripts/build_app.sh`
+- Manual dogfooding of `/Applications/TmuxPal.app` with four rings visible
+  (Claude W/5h + Codex W/5h), values cross-checked against
+  `~/.claude/cache/statusline-rate-limits.json`.
+
 ## v0.9.3
 
 TmuxPal v0.9.3 fixes herdr agent discovery when the menu bar app is launched
