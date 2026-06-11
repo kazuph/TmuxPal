@@ -57,13 +57,16 @@ hdiutil create \
 /bin/rm -rf "$dmg_root"
 
 if [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${CODESIGN_IDENTITY:-}" ]]; then
+  codesign --force --timestamp --sign "$CODESIGN_IDENTITY" "$dmg_path"
   xcrun notarytool submit "$dmg_path" \
     --apple-id "$APPLE_ID" \
     --team-id "$APPLE_TEAM_ID" \
     --password "$APPLE_APP_SPECIFIC_PASSWORD" \
     --wait
   xcrun stapler staple "$dmg_path"
-  spctl -a -vvv -t open "$dmg_path"
+  # Disk images need an explicit assessment context; a bare `spctl -t open`
+  # reports "Insufficient Context" even for notarized, stapled images.
+  spctl -a -vvv -t open --context context:primary-signature "$dmg_path"
 fi
 
 (
