@@ -18,7 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-        NSApp.setActivationPolicy(.accessory)
+        // Regular policy so TmuxPal shows up in the Dock and the Cmd+Tab app
+        // switcher; selecting it there raises the overlay.
+        NSApp.setActivationPolicy(.regular)
+        configureMainMenu()
         try? AppSupport.ensureSupportDirectory()
         DebugLog.write("app launched")
 
@@ -41,6 +44,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         DebugLog.write("app terminating")
         appServerManager?.stop()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        overlayController?.bringToFront()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        overlayController?.bringToFront()
+        return false
+    }
+
+    private func configureMainMenu() {
+        let mainMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(NSMenuItem(title: "Show Overlay", action: #selector(reloadOverlay), keyEquivalent: "r"))
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(title: "Quit TmuxPal", action: #selector(quit), keyEquivalent: "q"))
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+        NSApp.mainMenu = mainMenu
     }
 
     private func configureStatusItem() {
@@ -1032,6 +1056,16 @@ final class OverlayController {
 
     func toggle() {
         window.isVisible ? window.orderOut(nil) : show()
+    }
+
+    /// Raises the overlay, re-showing it first if it was hidden. Called when
+    /// the user picks TmuxPal in the Dock or the Cmd+Tab switcher.
+    func bringToFront() {
+        guard window.isVisible else {
+            show()
+            return
+        }
+        window.orderFrontRegardless()
     }
 
     func reloadNow() {

@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.9.7
+
+TmuxPal v0.9.7 makes the app selectable like any other app, so the overlay is
+one Cmd+Tab away.
+
+### Highlights
+
+- TmuxPal now uses the regular app activation policy: it shows up in the Dock
+  and the Cmd+Tab app switcher. Selecting it (Cmd+Tab or Dock click) raises
+  the overlay to the front, re-showing it first if it was hidden.
+- Added a minimal main menu (Show Overlay, Quit) for when the app is active.
+
+### Verification
+
+- `swift test`
+- Live check against an isolated fake tmux server: activation policy reports
+  `regular`, and activating the process (the Cmd+Tab equivalent) moves the
+  overlay from behind Ghostty to the front of the layer-0 window ordering.
+
 ## v0.9.6
 
 TmuxPal v0.9.6 stops keeping the overlay above all windows. The overlay is now

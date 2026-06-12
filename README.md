@@ -30,8 +30,9 @@ By default the overlay is a regular window, not an always-on-top panel: other
 windows can cover it, and TmuxPal leaves it wherever your window management
 puts it. When an AI pane finishes a run that has not been acknowledged yet,
 the overlay raises itself to the front once so you notice the completion.
-Turn on "Always on Top" in the menu bar menu to keep it floating above all
-windows like in older releases.
+TmuxPal also appears in the Dock and the Cmd+Tab app switcher, so selecting it
+there brings the overlay forward at any time. Turn on "Always on Top" in the
+menu bar menu to keep it floating above all windows like in older releases.
 
 ## Supported Agent TUIs
 
