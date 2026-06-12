@@ -242,7 +242,10 @@ public struct TmuxCollector: Sendable {
             title: title,
             commandLine: commandLine,
             tool: tool,
-            status: parts[10] == "1" ? .selected : .running,
+            // tmux gives no reliable run signal, so leave inactive panes as
+            // .idle and let BubbleRunClassifier read the transcript markers.
+            // Only herdr panes report a trustworthy .running status.
+            status: parts[10] == "1" ? .selected : .idle,
             observedAt: observedAt
         )
     }

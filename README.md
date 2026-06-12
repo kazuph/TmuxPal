@@ -26,6 +26,13 @@ Code, GitHub Copilot CLI, and opencode.
 Clicking a bubble focuses the matching tmux pane. Dragging the pal moves it and
 saves the position locally.
 
+By default the bubble stack stays collapsed (pal plus a completed-count badge)
+and expands automatically only while there is activity: a pane is running, or a
+finished run has not been acknowledged yet. Acknowledging a pane (clicking its
+bubble or focusing it in tmux) collapses the stack again. Turn on
+"Always Show Bubbles" in the menu bar menu to keep the bubbles expanded all the
+time instead.
+
 ## Supported Agent TUIs
 
 TmuxPal detects these tools when they are running inside tmux panes:

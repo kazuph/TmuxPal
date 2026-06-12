@@ -61,6 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(palGalleryMenuItem())
         menu.addItem(screenshotMenuItem())
         menu.addItem(usageRingModeMenuItem())
+        let alwaysBubblesItem = NSMenuItem(
+            title: "Always Show Bubbles",
+            action: #selector(toggleAlwaysShowBubbles),
+            keyEquivalent: ""
+        )
+        alwaysBubblesItem.state = overlayController?.bubbleVisibilityMode == .always ? .on : .off
+        menu.addItem(alwaysBubblesItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Install/Update tmux Hooks...", action: #selector(reinstallTmuxHooks), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Remove tmux Hooks...", action: #selector(uninstallTmuxHooks), keyEquivalent: ""))
@@ -222,6 +229,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleScreenshotMode() {
         guard let overlayController else { return }
         overlayController.setScreenshotModeEnabled(!overlayController.isScreenshotModeEnabled)
+        rebuildStatusMenu()
+    }
+
+    @objc private func toggleAlwaysShowBubbles() {
+        guard let overlayController else { return }
+        let next: BubbleVisibilityMode = overlayController.bubbleVisibilityMode == .always ? .activeOnly : .always
+        overlayController.setBubbleVisibilityMode(next)
         rebuildStatusMenu()
     }
 
@@ -1046,6 +1060,15 @@ final class OverlayController {
         overlayView.usageRingMode
     }
 
+    var bubbleVisibilityMode: BubbleVisibilityMode {
+        overlayView.visibilityMode
+    }
+
+    func setBubbleVisibilityMode(_ mode: BubbleVisibilityMode) {
+        overlayView.setVisibilityMode(mode)
+        fitWindow()
+    }
+
     func setScreenshotModeEnabled(_ enabled: Bool) {
         screenshotModeEnabled = enabled
         if enabled {
@@ -1470,6 +1493,14 @@ enum UsageRingDisplayMode: String, CaseIterable {
     }
 }
 
+enum BubbleVisibilityMode: String {
+    /// Default: keep the bubble stack collapsed and expand it only while a
+    /// pane is running or a finished run is still waiting for acknowledgment.
+    case activeOnly
+    /// Legacy behavior: keep the bubble stack expanded all the time.
+    case always
+}
+
 @MainActor
 final class OverlayView: NSView {
     static let basePalSize = NSSize(width: 77, height: 85)
@@ -1489,6 +1520,7 @@ final class OverlayView: NSView {
     static let collapsedBadgeHorizontalAnchor: CGFloat = 0.72
     static let usageRingLabelOutset: CGFloat = 58
     static let usageRingModeDefaultsKey = "codexUsageRingMode"
+    static let bubbleVisibilityModeDefaultsKey = "bubbleVisibilityMode"
 
     var onDrag: ((_ screenPoint: CGPoint, _ palGrabOffset: CGPoint, _ horizontalDelta: CGFloat) -> Void)?
     var onClickPane: ((TmuxPane) -> Void)?
@@ -1514,6 +1546,11 @@ final class OverlayView: NSView {
     private var palScale = PalSettings.displaySize.scale
     private let runClassifier = BubbleRunClassifier()
     private var runStatesByPaneId: [String: BubbleRunState] = [:]
+    private var activityTracker = BubbleActivityTracker()
+    private var lastAutoExpandState: Bool?
+    private(set) var visibilityMode = BubbleVisibilityMode(
+        rawValue: UserDefaults.standard.string(forKey: bubbleVisibilityModeDefaultsKey) ?? ""
+    ) ?? .activeOnly
     private var completedBubbleCount = 0
     private var highlightedPaneId: String?
     private var manuallyHighlightedPaneId: String?
@@ -1535,6 +1572,9 @@ final class OverlayView: NSView {
     init(frame frameRect: NSRect = .zero, palAssetConfig: PalAssetConfig) {
         self.palAssetConfig = palAssetConfig
         super.init(frame: frameRect)
+        if visibilityMode == .activeOnly {
+            isCollapsed = true
+        }
         wantsLayer = false
         reloadPalAssets()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 0.24, repeats: true) { [weak self] _ in
@@ -1728,6 +1768,32 @@ final class OverlayView: NSView {
         needsDisplay = true
     }
 
+    func setVisibilityMode(_ mode: BubbleVisibilityMode) {
+        visibilityMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: Self.bubbleVisibilityModeDefaultsKey)
+        lastAutoExpandState = nil
+        switch mode {
+        case .always:
+            setCollapsed(UserDefaults.standard.bool(forKey: "bubblesCollapsed"), persist: false)
+        case .activeOnly:
+            setCollapsed(!activityTracker.hasActivity, persist: false)
+            lastAutoExpandState = activityTracker.hasActivity
+        }
+    }
+
+    /// In activeOnly mode the collapse state follows pane activity. The
+    /// decision is edge-triggered so a manual pal-click override survives
+    /// until the next activity transition.
+    private func applyAutoVisibility() {
+        guard visibilityMode == .activeOnly, showsBubbleUI else { return }
+        let shouldExpand = activityTracker.hasActivity
+        guard lastAutoExpandState != shouldExpand else { return }
+        lastAutoExpandState = shouldExpand
+        if isCollapsed == shouldExpand {
+            setCollapsed(!shouldExpand, persist: false)
+        }
+    }
+
     func setUsageSnapshot(_ snapshot: CodexUsageSnapshot?) {
         usageSnapshot = snapshot?.hasVisibleBuckets == true ? snapshot : nil
         needsDisplay = true
@@ -1775,6 +1841,8 @@ final class OverlayView: NSView {
             acknowledgedPaneIds.insert(bubble.pane.paneId)
         }
         completedBubbleCount = runStatesByPaneId.values.filter { $0 == .complete }.count
+        activityTracker.update(runStates: nextRunStates, acknowledgedPaneIds: acknowledgedPaneIds)
+        applyAutoVisibility()
         if bubbles.isEmpty {
             setAnimationState("waiting")
         } else if bubbles.contains(where: { $0.lastEvent?.event.contains("exited") == true || $0.lastEvent?.event.contains("died") == true }) {
@@ -1790,10 +1858,12 @@ final class OverlayView: NSView {
     func setHighlightedPaneId(_ paneId: String, manual: Bool) {
         highlightedPaneId = paneId
         acknowledgedPaneIds.insert(paneId)
+        activityTracker.acknowledge(paneId: paneId)
         if manual {
             manuallyHighlightedPaneId = paneId
         }
         needsDisplay = true
+        applyAutoVisibility()
     }
 
     private func updateHighlightedPaneId() {
@@ -2378,7 +2448,9 @@ final class OverlayView: NSView {
 
     private func toggleCollapsed() {
         isCollapsed.toggle()
-        UserDefaults.standard.set(isCollapsed, forKey: "bubblesCollapsed")
+        if visibilityMode == .always {
+            UserDefaults.standard.set(isCollapsed, forKey: "bubblesCollapsed")
+        }
         bubbleRects.removeAll()
         needsDisplay = true
         onCollapseChanged?()

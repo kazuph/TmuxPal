@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.9.5
+
+TmuxPal v0.9.5 stops showing the full bubble stack all the time. The overlay
+now stays collapsed by default and becomes active only when something happens.
+
+### Highlights
+
+- New default "active only" bubble visibility: the bubble stack stays
+  collapsed (pal plus completed-count badge) and expands automatically while a
+  pane is running or a finished run is still unacknowledged. Acknowledging the
+  pane (clicking its bubble or focusing it in tmux) collapses the stack again.
+- Added an "Always Show Bubbles" toggle to the menu bar menu to restore the
+  previous always-expanded behavior.
+- Fixed inactive tmux panes always classifying as running: tmux panes no
+  longer report a hard `.running` status, so the transcript-marker based run
+  detection works as intended (herdr panes keep their reliable status).
+
+### Verification
+
+- `swift test` (37 tests, including new `BubbleActivityTracker` coverage)
+- End-to-end dogfooding against an isolated fake tmux server
+  (`TMUXPAL_TMUX_SOCKET`) with snapshot evidence: idle → collapsed, running →
+  auto-expand, complete-unacknowledged → stays expanded, acknowledged →
+  auto-collapse, and "Always Show Bubbles" → expanded while idle.
+
 ## v0.9.4
 
 TmuxPal v0.9.4 adds Claude Code usage rings alongside the existing Codex
