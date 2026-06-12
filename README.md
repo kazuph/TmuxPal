@@ -26,12 +26,12 @@ Code, GitHub Copilot CLI, and opencode.
 Clicking a bubble focuses the matching tmux pane. Dragging the pal moves it and
 saves the position locally.
 
-By default the bubble stack stays collapsed (pal plus a completed-count badge)
-and expands automatically only while there is activity: a pane is running, or a
-finished run has not been acknowledged yet. Acknowledging a pane (clicking its
-bubble or focusing it in tmux) collapses the stack again. Turn on
-"Always Show Bubbles" in the menu bar menu to keep the bubbles expanded all the
-time instead.
+By default the overlay is a regular window, not an always-on-top panel: other
+windows can cover it, and TmuxPal leaves it wherever your window management
+puts it. When an AI pane finishes a run that has not been acknowledged yet,
+the overlay raises itself to the front once so you notice the completion.
+Turn on "Always on Top" in the menu bar menu to keep it floating above all
+windows like in older releases.
 
 ## Supported Agent TUIs
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.9.6
+
+TmuxPal v0.9.6 stops keeping the overlay above all windows. The overlay is now
+a regular-level window that only raises itself when a task completes.
+
+### Highlights
+
+- The overlay window no longer floats above everything: it sits at normal
+  window level, so other windows can cover it and TmuxPal does nothing when
+  they do.
+- When an AI pane finishes a run that has not been acknowledged yet, the
+  overlay raises itself to the front once (without stealing focus).
+- Added an "Always on Top" menu toggle that restores the old always-floating
+  behavior.
+- Removed the v0.9.5 auto-collapsing bubble mode and its "Always Show
+  Bubbles" toggle; bubbles behave like v0.9.4 again. The v0.9.5 fix for
+  inactive tmux panes being misclassified as running is kept, since completion
+  detection depends on it.
+
+### Verification
+
+- `swift test`
+- End-to-end check against an isolated fake tmux server with
+  `CGWindowListCopyWindowInfo`: idle overlay sits at window layer 0 (normal
+  level) instead of 25, and jumps to the front of the layer-0 ordering when a
+  fake pane prints a completion marker.
+
 ## v0.9.5
 
 TmuxPal v0.9.5 stops showing the full bubble stack all the time. The overlay

@@ -568,59 +568,6 @@ final class TmuxPalCoreTests: XCTestCase {
         ].joined(separator: TmuxCollector.fieldSeparator)
     }
 
-    func testActivityTrackerStaysQuietForPanesThatNeverRan() {
-        var tracker = BubbleActivityTracker()
-
-        let active = tracker.update(
-            runStates: ["%1": .complete, "%2": .complete],
-            acknowledgedPaneIds: []
-        )
-
-        XCTAssertFalse(active)
-        XCTAssertFalse(tracker.hasActivity)
-    }
-
-    func testActivityTrackerReportsRunningPane() {
-        var tracker = BubbleActivityTracker()
-
-        XCTAssertTrue(tracker.update(runStates: ["%1": .running], acknowledgedPaneIds: []))
-        XCTAssertTrue(tracker.hasActivity)
-    }
-
-    func testActivityTrackerKeepsAttentionAfterRunCompletesUntilAcknowledged() {
-        var tracker = BubbleActivityTracker()
-        tracker.update(runStates: ["%1": .running], acknowledgedPaneIds: [])
-
-        XCTAssertTrue(tracker.update(runStates: ["%1": .complete], acknowledgedPaneIds: []))
-        XCTAssertTrue(tracker.update(runStates: ["%1": .complete], acknowledgedPaneIds: []))
-        XCTAssertFalse(tracker.acknowledge(paneId: "%1"))
-    }
-
-    func testActivityTrackerClearsAttentionWhenPaneAcknowledgedViaUpdate() {
-        var tracker = BubbleActivityTracker()
-        tracker.update(runStates: ["%1": .running], acknowledgedPaneIds: [])
-
-        XCTAssertFalse(tracker.update(runStates: ["%1": .complete], acknowledgedPaneIds: ["%1"]))
-    }
-
-    func testActivityTrackerDropsAttentionForClosedPanes() {
-        var tracker = BubbleActivityTracker()
-        tracker.update(runStates: ["%1": .running, "%2": .complete], acknowledgedPaneIds: [])
-        tracker.update(runStates: ["%1": .complete, "%2": .complete], acknowledgedPaneIds: [])
-
-        XCTAssertFalse(tracker.update(runStates: ["%2": .complete], acknowledgedPaneIds: []))
-    }
-
-    func testActivityTrackerReacquiresAttentionWhenPaneRunsAgain() {
-        var tracker = BubbleActivityTracker()
-        tracker.update(runStates: ["%1": .running], acknowledgedPaneIds: [])
-        tracker.update(runStates: ["%1": .complete], acknowledgedPaneIds: [])
-        tracker.acknowledge(paneId: "%1")
-        XCTAssertFalse(tracker.hasActivity)
-
-        XCTAssertTrue(tracker.update(runStates: ["%1": .running], acknowledgedPaneIds: []))
-        XCTAssertTrue(tracker.update(runStates: ["%1": .complete], acknowledgedPaneIds: []))
-    }
 }
 
 final class RecordingRunner: CommandRunning, @unchecked Sendable {
