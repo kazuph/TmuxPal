@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.9.8
+
+TmuxPal v0.9.8 ships a new app icon for its new life in the Dock.
+
+### Highlights
+
+- New "Cat on Top" app icon: a cozy pixel-art cat hugging the terminal window
+  while holding up a green task-complete badge. Generated with Codex image
+  generation; picked from three candidates. Replaces the icon shown in the
+  Dock, Cmd+Tab switcher, and README.
+- The artwork is composited onto a full-bleed dark gradient background so
+  macOS 26 clips it into its own squircle instead of mounting the transparent
+  art on a white system plate.
+
+### Verification
+
+- Icon rendered from a 1024x1024 transparent PNG into a full
+  `AppIcon.iconset` (16-1024px) via `iconutil`; small-size readability
+  checked at 64px.
+- `swift test` and a local app build with the new `AppIcon.icns` bundled.
+
 ## v0.9.7
 
 TmuxPal v0.9.7 makes the app selectable like any other app, so the overlay is
