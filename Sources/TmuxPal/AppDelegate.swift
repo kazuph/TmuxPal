@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var overlayController: OverlayController?
     private var appServerManager: AppServerManager?
+    private var latestCodexUsageSnapshot: CodexUsageSnapshot?
+    private var latestClaudeUsageSnapshot: ClaudeUsageSnapshot?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard SingleInstanceGuard.shouldContinueLaunching() else {
@@ -27,6 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let overlayController = OverlayController()
         self.overlayController = overlayController
+        overlayController.onUsageChanged = { [weak self] codexSnapshot, claudeSnapshot in
+            self?.latestCodexUsageSnapshot = codexSnapshot
+            self?.latestClaudeUsageSnapshot = claudeSnapshot
+            self?.rebuildStatusMenu()
+        }
         overlayController.show()
 
         if ProcessInfo.processInfo.environment["TMUXPAL_ENABLE_APP_SERVER"] == "1" {
@@ -68,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(withLength: StatusBarLimitImage.size.width + 6)
         statusItem = item
         rebuildStatusMenu()
     }
@@ -76,6 +83,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildStatusMenu() {
         updateStatusButton()
         let menu = NSMenu()
+        for item in StatusBarLimitImage.menuItems(
+            codexSnapshot: latestCodexUsageSnapshot,
+            claudeSnapshot: latestClaudeUsageSnapshot,
+            target: self,
+            action: #selector(ignoreLimitMenuItem(_:))
+        ) {
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Show/Hide", action: #selector(toggleOverlay), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Reload", action: #selector(reloadOverlay), keyEquivalent: "r"))
         menu.addItem(.separator())
@@ -107,8 +123,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusButton() {
         guard let button = statusItem?.button else { return }
         button.title = ""
-        button.image = PalSettings.statusBarImage()
+        statusItem?.length = StatusBarLimitImage.size.width + 6
+        button.image = PalSettings.statusBarImage(
+            codexSnapshot: latestCodexUsageSnapshot,
+            claudeSnapshot: latestClaudeUsageSnapshot
+        )
         button.imagePosition = .imageOnly
+        button.toolTip = StatusBarLimitImage.tooltip(
+            codexSnapshot: latestCodexUsageSnapshot,
+            claudeSnapshot: latestClaudeUsageSnapshot
+        )
     }
 
     private func palSelectionMenuItem() -> NSMenuItem {
@@ -188,6 +212,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleOverlay() {
         overlayController?.toggle()
     }
+
+    @objc private func ignoreLimitMenuItem(_ sender: NSMenuItem) {}
 
     @objc private func reloadOverlay() {
         overlayController?.reloadNow()
@@ -458,8 +484,14 @@ enum PalSettings {
         return firstFrameImage(for: PalAssetConfig(metadataURL: metadataURL), size: NSSize(width: 20, height: 22))
     }
 
-    static func statusBarImage() -> NSImage? {
-        firstFrameImage(for: assetConfig(), size: NSSize(width: 18, height: 20))
+    static func statusBarImage(codexSnapshot: CodexUsageSnapshot?, claudeSnapshot: ClaudeUsageSnapshot?) -> NSImage? {
+        StatusBarLimitImage.make(
+            palImage: firstFrameImage(for: assetConfig(), size: NSSize(width: 18, height: 20)),
+            codexSnapshot: codexSnapshot,
+            claudeSnapshot: claudeSnapshot,
+            codexPalette: UsageRingPalette.derived(from: PalSpriteLoader(config: assetConfig()).dominantColor()),
+            claudePalette: UsageRingPalette.derived(from: UsageRingPalette.claudeBase)
+        )
     }
 
     private static func firstFrameImage(for config: PalAssetConfig, size: NSSize) -> NSImage? {
@@ -513,6 +545,147 @@ enum PalSettings {
             return url.deletingLastPathComponent()
         }
         return nil
+    }
+}
+
+private enum StatusBarLimitImage {
+    static let size = NSSize(width: 64, height: 22)
+
+    private struct Row {
+        let label: String
+        let bucket: CodexUsageBucket?
+        let color: NSColor
+    }
+
+    static func make(
+        palImage: NSImage?,
+        codexSnapshot: CodexUsageSnapshot?,
+        claudeSnapshot: ClaudeUsageSnapshot?,
+        codexPalette: UsageRingPalette,
+        claudePalette: UsageRingPalette
+    ) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        palImage?.draw(in: NSRect(x: 0, y: 1, width: 18, height: 20))
+
+        let rows = rows(
+            codexSnapshot: codexSnapshot,
+            claudeSnapshot: claudeSnapshot,
+            codexPalette: codexPalette,
+            claudePalette: claudePalette
+        )
+        for (index, row) in rows.enumerated() {
+            draw(row: row, y: size.height - 4.5 - CGFloat(index) * 5.0)
+        }
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
+    }
+
+    static func tooltip(codexSnapshot: CodexUsageSnapshot?, claudeSnapshot: ClaudeUsageSnapshot?) -> String {
+        usageRows(codexSnapshot: codexSnapshot, claudeSnapshot: claudeSnapshot)
+            .map { row in
+                guard let bucket = row.bucket else { return "\(row.label): --" }
+                return "\(row.label): \(Int(round(bucket.remainingPercent)))% remaining, reset \(resetText(for: bucket))"
+            }
+            .joined(separator: "\n")
+    }
+
+    static func menuItems(
+        codexSnapshot: CodexUsageSnapshot?,
+        claudeSnapshot: ClaudeUsageSnapshot?,
+        target: AnyObject?,
+        action: Selector?
+    ) -> [NSMenuItem] {
+        usageRows(codexSnapshot: codexSnapshot, claudeSnapshot: claudeSnapshot).map { row in
+            let item = NSMenuItem(
+                title: "\(row.label): \(limitText(for: row.bucket))",
+                action: action,
+                keyEquivalent: ""
+            )
+            item.target = target
+            return item
+        }
+    }
+
+    private static func rows(
+        codexSnapshot: CodexUsageSnapshot?,
+        claudeSnapshot: ClaudeUsageSnapshot?,
+        codexPalette: UsageRingPalette,
+        claudePalette: UsageRingPalette
+    ) -> [Row] {
+        [
+            Row(label: "CC W", bucket: claudeSnapshot?.sevenDay, color: claudePalette.weekly),
+            Row(label: "CC 5h", bucket: claudeSnapshot?.fiveHour, color: claudePalette.shortTerm),
+            Row(label: "CX W", bucket: codexSnapshot?.weekly, color: codexPalette.weekly),
+            Row(label: "CX 5h", bucket: codexSnapshot?.shortTerm, color: codexPalette.shortTerm)
+        ]
+    }
+
+    private static func usageRows(
+        codexSnapshot: CodexUsageSnapshot?,
+        claudeSnapshot: ClaudeUsageSnapshot?
+    ) -> [(label: String, bucket: CodexUsageBucket?)] {
+        [
+            ("Claude Code W", claudeSnapshot?.sevenDay),
+            ("Claude Code 5h", claudeSnapshot?.fiveHour),
+            ("Codex W", codexSnapshot?.weekly),
+            ("Codex 5h", codexSnapshot?.shortTerm)
+        ]
+    }
+
+    private static func limitText(for bucket: CodexUsageBucket?) -> String {
+        guard let bucket else {
+            return "-- remaining, reset --"
+        }
+        return "\(Int(round(bucket.remainingPercent)))% remaining, reset \(resetText(for: bucket))"
+    }
+
+    private static func resetText(for bucket: CodexUsageBucket) -> String {
+        guard let resetAt = bucket.resetAt else {
+            return "--"
+        }
+        let normalizedResetAt = resetAt > 10_000_000_000 ? resetAt / 1000.0 : resetAt
+        return Self.resetDateFormatter.string(from: Date(timeIntervalSince1970: normalizedResetAt))
+    }
+
+    private static let resetDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.timeZone = TimeZone.autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("M/d HH:mm")
+        return formatter
+    }()
+
+    private static func draw(row: Row, y: CGFloat) {
+        let labelAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 4.4, weight: .semibold),
+            .foregroundColor: NSColor.labelColor.withAlphaComponent(0.82)
+        ]
+        NSString(string: row.label).draw(at: CGPoint(x: 20, y: y - 0.8), withAttributes: labelAttrs)
+
+        let trackRect = NSRect(x: 39, y: y, width: 22, height: 2.5)
+        NSColor.labelColor.withAlphaComponent(0.18).setFill()
+        NSBezierPath(roundedRect: trackRect, xRadius: 1.3, yRadius: 1.3).fill()
+
+        guard let bucket = row.bucket else {
+            drawUnavailableMarks(in: trackRect)
+            return
+        }
+
+        let fillWidth = max(1.0, trackRect.width * CGFloat(bucket.remainingPercent / 100.0))
+        let fillRect = NSRect(x: trackRect.minX, y: trackRect.minY, width: fillWidth, height: trackRect.height)
+        row.color.withAlphaComponent(0.95).setFill()
+        NSBezierPath(roundedRect: fillRect, xRadius: 1.3, yRadius: 1.3).fill()
+    }
+
+    private static func drawUnavailableMarks(in rect: NSRect) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 3.9, weight: .regular),
+            .foregroundColor: NSColor.labelColor.withAlphaComponent(0.34)
+        ]
+        NSString(string: "----").draw(at: CGPoint(x: rect.midX - 6, y: rect.minY - 1.2), withAttributes: attrs)
     }
 }
 
@@ -946,16 +1119,51 @@ actor ClaudeUsageReader {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.keychainService,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess else {
+            DebugLog.write("claude usage: keychain lookup failed status=\(status)")
+            return nil
+        }
+        guard let items = item as? [[String: Any]] else {
+            DebugLog.write("claude usage: keychain lookup returned unexpected item")
+            return nil
+        }
+        for item in items {
+            guard let account = item[kSecAttrAccount as String] as? String,
+                  let data = keychainData(account: account),
+                  let token = oauthToken(from: data) else {
+                continue
+            }
+            DebugLog.write("claude usage: oauth token loaded from keychain account=\(account)")
+            return token
+        }
+        DebugLog.write("claude usage: no usable oauth token in keychain")
+        return nil
+    }
+
+    private func keychainData(account: String) -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.keychainService,
+            kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else {
-            DebugLog.write("claude usage: keychain lookup failed status=\(status)")
+        guard status == errSecSuccess else {
+            DebugLog.write("claude usage: keychain data lookup failed account=\(account) status=\(status)")
             return nil
         }
-        return oauthToken(from: data)
+        guard let data = item as? Data else {
+            DebugLog.write("claude usage: keychain data lookup returned unexpected item account=\(account)")
+            return nil
+        }
+        return data
     }
 
     private func oauthToken(from data: Data) -> String? {
@@ -991,6 +1199,7 @@ final class OverlayController {
     private var usageTimer: Timer?
     private let codexUsageReader = CodexUsageReader()
     private let claudeUsageReader = ClaudeUsageReader()
+    var onUsageChanged: ((CodexUsageSnapshot?, ClaudeUsageSnapshot?) -> Void)?
 
     init() {
         overlayView = OverlayView(palAssetConfig: PalSettings.assetConfig())
@@ -1268,11 +1477,6 @@ final class OverlayController {
     }
 
     private func reloadUsage() async {
-        guard overlayView.showsUsageRings else {
-            overlayView.setUsageSnapshot(nil)
-            overlayView.setClaudeUsageSnapshot(nil)
-            return
-        }
         let codexReader = codexUsageReader
         let claudeReader = claudeUsageReader
         async let codexSnapshot = Task.detached(priority: .utility) {
@@ -1281,8 +1485,16 @@ final class OverlayController {
         async let claudeSnapshot = Task.detached(priority: .utility) {
             await claudeReader.readLatest()
         }.value
-        overlayView.setUsageSnapshot(await codexSnapshot)
-        overlayView.setClaudeUsageSnapshot(await claudeSnapshot)
+        let nextCodexSnapshot = await codexSnapshot
+        let nextClaudeSnapshot = await claudeSnapshot
+        onUsageChanged?(nextCodexSnapshot, nextClaudeSnapshot)
+        if overlayView.showsUsageRings {
+            overlayView.setUsageSnapshot(nextCodexSnapshot)
+            overlayView.setClaudeUsageSnapshot(nextClaudeSnapshot)
+        } else {
+            overlayView.setUsageSnapshot(nil)
+            overlayView.setClaudeUsageSnapshot(nil)
+        }
         if let snapshotPath = ProcessInfo.processInfo.environment["TMUXPAL_SNAPSHOT_PATH"] {
             overlayView.writeSnapshot(to: URL(fileURLWithPath: snapshotPath))
         }
