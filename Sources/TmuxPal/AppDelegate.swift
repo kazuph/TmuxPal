@@ -659,14 +659,16 @@ private enum StatusBarLimitImage {
     }()
 
     private static func draw(row: Row, y: CGFloat) {
-        let labelAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 4.4, weight: .semibold),
-            .foregroundColor: NSColor.labelColor.withAlphaComponent(0.82)
-        ]
+        let labelAttrs = textAttributes(
+            NSFont.monospacedDigitSystemFont(ofSize: 4.4, weight: .semibold),
+            color: NSColor.white.withAlphaComponent(0.9)
+        )
         NSString(string: row.label).draw(at: CGPoint(x: 20, y: y - 0.8), withAttributes: labelAttrs)
 
         let trackRect = NSRect(x: 39, y: y, width: 22, height: 2.5)
-        NSColor.labelColor.withAlphaComponent(0.18).setFill()
+        NSColor.black.withAlphaComponent(0.22).setFill()
+        NSBezierPath(roundedRect: trackRect.insetBy(dx: -0.5, dy: -0.5), xRadius: 1.7, yRadius: 1.7).fill()
+        NSColor.white.withAlphaComponent(0.18).setFill()
         NSBezierPath(roundedRect: trackRect, xRadius: 1.3, yRadius: 1.3).fill()
 
         guard let bucket = row.bucket else {
@@ -681,11 +683,23 @@ private enum StatusBarLimitImage {
     }
 
     private static func drawUnavailableMarks(in rect: NSRect) {
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 3.9, weight: .regular),
-            .foregroundColor: NSColor.labelColor.withAlphaComponent(0.34)
-        ]
+        let attrs = textAttributes(
+            NSFont.monospacedDigitSystemFont(ofSize: 3.9, weight: .regular),
+            color: NSColor.white.withAlphaComponent(0.52)
+        )
         NSString(string: "----").draw(at: CGPoint(x: rect.midX - 6, y: rect.minY - 1.2), withAttributes: attrs)
+    }
+
+    private static func textAttributes(_ font: NSFont, color: NSColor) -> [NSAttributedString.Key: Any] {
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.9)
+        shadow.shadowOffset = NSSize(width: 0, height: -0.4)
+        shadow.shadowBlurRadius = 0.8
+        return [
+            .font: font,
+            .foregroundColor: color,
+            .shadow: shadow
+        ]
     }
 }
 
