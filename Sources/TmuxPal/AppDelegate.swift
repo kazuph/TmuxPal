@@ -618,7 +618,7 @@ private enum StatusBarLimitImage {
         let claudeFiveHour = compactPercent(claudeSnapshot?.fiveHour)
         let codexWeekly = compactPercent(codexSnapshot?.weekly)
         let codexFiveHour = compactPercent(codexSnapshot?.shortTerm)
-        return " CC W/5h \(claudeWeekly)/\(claudeFiveHour)  CX W/5h \(codexWeekly)/\(codexFiveHour)"
+        return " C \(claudeWeekly)/\(claudeFiveHour) X \(codexWeekly)/\(codexFiveHour)"
     }
 
     private static func rows(
