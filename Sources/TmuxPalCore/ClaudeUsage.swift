@@ -28,12 +28,18 @@ public enum ClaudeUsageParser {
     public static func snapshot(from object: [String: Any], observedAt: Date = Date(), source: String = "cache") -> ClaudeUsageSnapshot? {
         let rateLimits = object["rate_limits"] as? [String: Any] ?? object
         let fiveHour = bucket(
-            from: rateLimits["five_hour"],
+            from: firstValue(
+                in: rateLimits,
+                keys: ["five_hour", "fiveHour", "5h", "short_term", "shortTerm"]
+            ),
             label: "5h",
             windowSeconds: fiveHourWindowSeconds
         )
         let sevenDay = bucket(
-            from: rateLimits["seven_day"] ?? rateLimits["weekly"],
+            from: firstValue(
+                in: rateLimits,
+                keys: ["seven_day", "sevenDay", "weekly", "7d", "week"]
+            ),
             label: "W",
             windowSeconds: sevenDayWindowSeconds
         )
@@ -41,6 +47,15 @@ public enum ClaudeUsageParser {
             return nil
         }
         return ClaudeUsageSnapshot(fiveHour: fiveHour, sevenDay: sevenDay, observedAt: observedAt, source: source)
+    }
+
+    private static func firstValue(in dictionary: [String: Any], keys: [String]) -> Any? {
+        for key in keys {
+            if let value = dictionary[key] {
+                return value
+            }
+        }
+        return nil
     }
 
     private static func bucket(from value: Any?, label: String, windowSeconds: Double) -> CodexUsageBucket? {
@@ -57,7 +72,11 @@ public enum ClaudeUsageParser {
     }
 
     private static func usedPercent(from dictionary: [String: Any]) -> Double? {
-        if let percent = number(dictionary["used_percentage"]) ?? number(dictionary["percent"]) {
+        if let percent = number(dictionary["used_percentage"])
+            ?? number(dictionary["used_percent"])
+            ?? number(dictionary["percent"])
+            ?? number(dictionary["percentage"])
+        {
             return percent
         }
         if let utilization = number(dictionary["utilization"]) {

@@ -122,13 +122,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusButton() {
         guard let button = statusItem?.button else { return }
-        button.title = ""
-        statusItem?.length = StatusBarLimitImage.size.width + 6
+        statusItem?.length = NSStatusItem.variableLength
+        button.title = StatusBarLimitImage.compactTitle(
+            codexSnapshot: latestCodexUsageSnapshot,
+            claudeSnapshot: latestClaudeUsageSnapshot
+        )
+        button.font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold)
         button.image = PalSettings.statusBarImage(
             codexSnapshot: latestCodexUsageSnapshot,
             claudeSnapshot: latestClaudeUsageSnapshot
         )
-        button.imagePosition = .imageOnly
+        button.imagePosition = .imageLeft
         button.toolTip = StatusBarLimitImage.tooltip(
             codexSnapshot: latestCodexUsageSnapshot,
             claudeSnapshot: latestClaudeUsageSnapshot
@@ -609,6 +613,14 @@ private enum StatusBarLimitImage {
         }
     }
 
+    static func compactTitle(codexSnapshot: CodexUsageSnapshot?, claudeSnapshot: ClaudeUsageSnapshot?) -> String {
+        let claudeWeekly = compactPercent(claudeSnapshot?.sevenDay)
+        let claudeFiveHour = compactPercent(claudeSnapshot?.fiveHour)
+        let codexWeekly = compactPercent(codexSnapshot?.weekly)
+        let codexFiveHour = compactPercent(codexSnapshot?.shortTerm)
+        return " CC W/5h \(claudeWeekly)/\(claudeFiveHour)  CX W/5h \(codexWeekly)/\(codexFiveHour)"
+    }
+
     private static func rows(
         codexSnapshot: CodexUsageSnapshot?,
         claudeSnapshot: ClaudeUsageSnapshot?,
@@ -640,6 +652,11 @@ private enum StatusBarLimitImage {
             return "-- remaining, reset --"
         }
         return "\(Int(round(bucket.remainingPercent)))% remaining, reset \(resetText(for: bucket))"
+    }
+
+    private static func compactPercent(_ bucket: CodexUsageBucket?) -> String {
+        guard let bucket else { return "--" }
+        return "\(Int(round(bucket.remainingPercent)))"
     }
 
     private static func resetText(for bucket: CodexUsageBucket) -> String {
@@ -1029,6 +1046,7 @@ actor ClaudeUsageReader {
     private var lastLiveSnapshot: ClaudeUsageSnapshot?
     private var lastLiveAttempt: Date?
     private var liveRetryInterval: TimeInterval = 0
+    private var cachedAccessToken: String?
 
     func readLatest() async -> ClaudeUsageSnapshot? {
         if let cached = readStatuslineCache() {
@@ -1085,10 +1103,13 @@ actor ClaudeUsageReader {
         guard (200..<300).contains(http.statusCode),
               let snapshot = ClaudeUsageParser.snapshot(from: data, source: "live") else {
             DebugLog.write("claude usage: live fetch failed status=\(http.statusCode)")
+            if http.statusCode == 401 || http.statusCode == 403 {
+                cachedAccessToken = nil
+            }
             liveRetryInterval = Self.liveFailureBackoff
             return freshEnough(lastLiveSnapshot)
         }
-        DebugLog.write("claude usage: live fetch ok")
+        DebugLog.write("claude usage: live fetch ok fiveHour=\(snapshot.fiveHour != nil) sevenDay=\(snapshot.sevenDay != nil)")
         liveRetryInterval = Self.liveFetchInterval
         lastLiveSnapshot = snapshot
         return snapshot
@@ -1103,10 +1124,18 @@ actor ClaudeUsageReader {
     }
 
     private func accessToken() -> String? {
+        if let cachedAccessToken {
+            return cachedAccessToken
+        }
         if let token = credentialsFileToken() {
+            cachedAccessToken = token
             return token
         }
-        return keychainToken()
+        if let token = keychainToken() {
+            cachedAccessToken = token
+            return token
+        }
+        return nil
     }
 
     private func credentialsFileToken() -> String? {
@@ -1132,9 +1161,8 @@ actor ClaudeUsageReader {
             DebugLog.write("claude usage: keychain lookup returned unexpected item")
             return nil
         }
-        for item in items {
-            guard let account = item[kSecAttrAccount as String] as? String,
-                  let data = keychainData(account: account),
+        for account in tokenKeychainAccounts(from: items) {
+            guard let data = keychainData(account: account),
                   let token = oauthToken(from: data) else {
                 continue
             }
@@ -1143,6 +1171,12 @@ actor ClaudeUsageReader {
         }
         DebugLog.write("claude usage: no usable oauth token in keychain")
         return nil
+    }
+
+    private func tokenKeychainAccounts(from items: [[String: Any]]) -> [String] {
+        items
+            .compactMap { $0[kSecAttrAccount as String] as? String }
+            .filter { !$0.localizedCaseInsensitiveContains("Assistant Identifier") }
     }
 
     private func keychainData(account: String) -> Data? {

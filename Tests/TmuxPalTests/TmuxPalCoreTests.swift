@@ -145,6 +145,22 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertNil(snapshot.sevenDay?.resetAt)
     }
 
+    func testParsesClaudeLiveUsageAliases() throws {
+        let payload = """
+        {
+          "fiveHour": {"used_percent": 31, "reset_at": 18000},
+          "weekly": {"percentage": 44}
+        }
+        """.data(using: .utf8)!
+
+        let snapshot = try XCTUnwrap(ClaudeUsageParser.snapshot(from: payload, observedAt: Date(timeIntervalSince1970: 0)))
+        XCTAssertEqual(snapshot.fiveHour?.label, "5h")
+        XCTAssertEqual(snapshot.fiveHour?.usedPercent, 31)
+        XCTAssertEqual(snapshot.fiveHour?.resetAt, 18000)
+        XCTAssertEqual(snapshot.sevenDay?.label, "W")
+        XCTAssertEqual(snapshot.sevenDay?.usedPercent, 44)
+    }
+
     func testClaudeUsageParserReturnsNilWithoutBuckets() {
         let payload = "{\"rate_limits\": {}}".data(using: .utf8)!
         XCTAssertNil(ClaudeUsageParser.snapshot(from: payload))
