@@ -75,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: StatusBarLimitImage.size.width + 6)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         rebuildStatusMenu()
     }
@@ -122,17 +122,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusButton() {
         guard let button = statusItem?.button else { return }
-        statusItem?.length = NSStatusItem.variableLength
-        button.title = StatusBarLimitImage.compactTitle(
-            codexSnapshot: latestCodexUsageSnapshot,
-            claudeSnapshot: latestClaudeUsageSnapshot
-        )
-        button.font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold)
-        button.image = PalSettings.statusBarImage(
-            codexSnapshot: latestCodexUsageSnapshot,
-            claudeSnapshot: latestClaudeUsageSnapshot
-        )
-        button.imagePosition = .imageLeft
+        statusItem?.length = NSStatusItem.squareLength
+        button.title = ""
+        button.image = PalSettings.statusBarImage()
+        button.imagePosition = .imageOnly
         button.toolTip = StatusBarLimitImage.tooltip(
             codexSnapshot: latestCodexUsageSnapshot,
             claudeSnapshot: latestClaudeUsageSnapshot
@@ -488,14 +481,8 @@ enum PalSettings {
         return firstFrameImage(for: PalAssetConfig(metadataURL: metadataURL), size: NSSize(width: 20, height: 22))
     }
 
-    static func statusBarImage(codexSnapshot: CodexUsageSnapshot?, claudeSnapshot: ClaudeUsageSnapshot?) -> NSImage? {
-        StatusBarLimitImage.make(
-            palImage: firstFrameImage(for: assetConfig(), size: NSSize(width: 18, height: 20)),
-            codexSnapshot: codexSnapshot,
-            claudeSnapshot: claudeSnapshot,
-            codexPalette: UsageRingPalette.derived(from: PalSpriteLoader(config: assetConfig()).dominantColor()),
-            claudePalette: UsageRingPalette.derived(from: UsageRingPalette.claudeBase)
-        )
+    static func statusBarImage() -> NSImage? {
+        firstFrameImage(for: assetConfig(), size: NSSize(width: 18, height: 20))
     }
 
     private static func firstFrameImage(for config: PalAssetConfig, size: NSSize) -> NSImage? {
@@ -553,40 +540,6 @@ enum PalSettings {
 }
 
 private enum StatusBarLimitImage {
-    static let size = NSSize(width: 64, height: 22)
-
-    private struct Row {
-        let label: String
-        let bucket: CodexUsageBucket?
-        let color: NSColor
-    }
-
-    static func make(
-        palImage: NSImage?,
-        codexSnapshot: CodexUsageSnapshot?,
-        claudeSnapshot: ClaudeUsageSnapshot?,
-        codexPalette: UsageRingPalette,
-        claudePalette: UsageRingPalette
-    ) -> NSImage {
-        let image = NSImage(size: size)
-        image.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
-        palImage?.draw(in: NSRect(x: 0, y: 1, width: 18, height: 20))
-
-        let rows = rows(
-            codexSnapshot: codexSnapshot,
-            claudeSnapshot: claudeSnapshot,
-            codexPalette: codexPalette,
-            claudePalette: claudePalette
-        )
-        for (index, row) in rows.enumerated() {
-            draw(row: row, y: size.height - 4.5 - CGFloat(index) * 5.0)
-        }
-        image.unlockFocus()
-        image.isTemplate = false
-        return image
-    }
-
     static func tooltip(codexSnapshot: CodexUsageSnapshot?, claudeSnapshot: ClaudeUsageSnapshot?) -> String {
         usageRows(codexSnapshot: codexSnapshot, claudeSnapshot: claudeSnapshot)
             .map { row in
@@ -613,28 +566,6 @@ private enum StatusBarLimitImage {
         }
     }
 
-    static func compactTitle(codexSnapshot: CodexUsageSnapshot?, claudeSnapshot: ClaudeUsageSnapshot?) -> String {
-        let claudeWeekly = compactPercent(claudeSnapshot?.sevenDay)
-        let claudeFiveHour = compactPercent(claudeSnapshot?.fiveHour)
-        let codexWeekly = compactPercent(codexSnapshot?.weekly)
-        let codexFiveHour = compactPercent(codexSnapshot?.shortTerm)
-        return " C \(claudeWeekly)/\(claudeFiveHour) X \(codexWeekly)/\(codexFiveHour)"
-    }
-
-    private static func rows(
-        codexSnapshot: CodexUsageSnapshot?,
-        claudeSnapshot: ClaudeUsageSnapshot?,
-        codexPalette: UsageRingPalette,
-        claudePalette: UsageRingPalette
-    ) -> [Row] {
-        [
-            Row(label: "CC W", bucket: claudeSnapshot?.sevenDay, color: claudePalette.weekly),
-            Row(label: "CC 5h", bucket: claudeSnapshot?.fiveHour, color: claudePalette.shortTerm),
-            Row(label: "CX W", bucket: codexSnapshot?.weekly, color: codexPalette.weekly),
-            Row(label: "CX 5h", bucket: codexSnapshot?.shortTerm, color: codexPalette.shortTerm)
-        ]
-    }
-
     private static func usageRows(
         codexSnapshot: CodexUsageSnapshot?,
         claudeSnapshot: ClaudeUsageSnapshot?
@@ -654,11 +585,6 @@ private enum StatusBarLimitImage {
         return "\(Int(round(bucket.remainingPercent)))% remaining, reset \(resetText(for: bucket))"
     }
 
-    private static func compactPercent(_ bucket: CodexUsageBucket?) -> String {
-        guard let bucket else { return "--" }
-        return "\(Int(round(bucket.remainingPercent)))"
-    }
-
     private static func resetText(for bucket: CodexUsageBucket) -> String {
         guard let resetAt = bucket.resetAt else {
             return "--"
@@ -675,35 +601,6 @@ private enum StatusBarLimitImage {
         return formatter
     }()
 
-    private static func draw(row: Row, y: CGFloat) {
-        let labelAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 4.4, weight: .semibold),
-            .foregroundColor: NSColor.labelColor.withAlphaComponent(0.82)
-        ]
-        NSString(string: row.label).draw(at: CGPoint(x: 20, y: y - 0.8), withAttributes: labelAttrs)
-
-        let trackRect = NSRect(x: 39, y: y, width: 22, height: 2.5)
-        NSColor.labelColor.withAlphaComponent(0.18).setFill()
-        NSBezierPath(roundedRect: trackRect, xRadius: 1.3, yRadius: 1.3).fill()
-
-        guard let bucket = row.bucket else {
-            drawUnavailableMarks(in: trackRect)
-            return
-        }
-
-        let fillWidth = max(1.0, trackRect.width * CGFloat(bucket.remainingPercent / 100.0))
-        let fillRect = NSRect(x: trackRect.minX, y: trackRect.minY, width: fillWidth, height: trackRect.height)
-        row.color.withAlphaComponent(0.95).setFill()
-        NSBezierPath(roundedRect: fillRect, xRadius: 1.3, yRadius: 1.3).fill()
-    }
-
-    private static func drawUnavailableMarks(in rect: NSRect) {
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 3.9, weight: .regular),
-            .foregroundColor: NSColor.labelColor.withAlphaComponent(0.34)
-        ]
-        NSString(string: "----").draw(at: CGPoint(x: rect.midX - 6, y: rect.minY - 1.2), withAttributes: attrs)
-    }
 }
 
 enum PalDisplaySize: String, CaseIterable {
