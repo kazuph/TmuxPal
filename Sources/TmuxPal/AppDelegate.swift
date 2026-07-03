@@ -899,7 +899,10 @@ struct CodexUsageReader {
     }
 
     private func readLiveUsage() async -> CodexUsageSnapshot? {
-        guard let token = accessToken() else { return nil }
+        guard let token = accessToken() else {
+            DebugLog.write("codex usage: no auth token available; skipping live fetch")
+            return nil
+        }
         var request = URLRequest(url: usageURL)
         request.httpMethod = "GET"
         request.timeoutInterval = 6
@@ -910,12 +913,19 @@ struct CodexUsageReader {
         if let accountID = accountID(fromAccessToken: token) {
             request.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
         }
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse,
-              (200..<300).contains(http.statusCode) else {
+        let result = try? await URLSession.shared.data(for: request)
+        guard let (data, response) = result,
+              let http = response as? HTTPURLResponse else {
+            DebugLog.write("codex usage: live fetch failed (network)")
             return nil
         }
-        return CodexUsageParser.snapshot(from: data, source: "live")
+        guard (200..<300).contains(http.statusCode) else {
+            DebugLog.write("codex usage: live fetch failed status=\(http.statusCode)")
+            return nil
+        }
+        let snapshot = CodexUsageParser.snapshot(from: data, source: "live")
+        DebugLog.write("codex usage: live fetch ok short=\(snapshot?.shortTerm != nil) weekly=\(snapshot?.weekly != nil)")
+        return snapshot
     }
 
     private func accessToken() -> String? {
@@ -960,7 +970,7 @@ struct CodexUsageReader {
         defer { sqlite3_close(db) }
 
         let sql = """
-        SELECT feedback_log_body
+        SELECT ts, feedback_log_body
         FROM logs
         WHERE feedback_log_body LIKE '%"type":"codex.rate_limits"%'
         ORDER BY ts DESC, ts_nanos DESC, id DESC
@@ -973,7 +983,13 @@ struct CodexUsageReader {
         }
         defer { sqlite3_finalize(statement) }
         guard sqlite3_step(statement) == SQLITE_ROW,
-              let text = sqlite3_column_text(statement, 0) else {
+              let text = sqlite3_column_text(statement, 1) else {
+            return nil
+        }
+        let timestamp = sqlite3_column_double(statement, 0)
+        let observedAt = Date(timeIntervalSince1970: timestamp)
+        guard Date().timeIntervalSince(observedAt) <= 30 * 60 else {
+            DebugLog.write("codex usage: latest local rate-limit log is stale observedAt=\(observedAt)")
             return nil
         }
         let body = String(cString: text)
@@ -981,7 +997,9 @@ struct CodexUsageReader {
               let data = json.data(using: .utf8) else {
             return nil
         }
-        return CodexUsageParser.snapshot(from: data, source: "log")
+        let snapshot = CodexUsageParser.snapshot(from: data, observedAt: observedAt, source: "log")
+        DebugLog.write("codex usage: local log fallback ok short=\(snapshot?.shortTerm != nil) weekly=\(snapshot?.weekly != nil)")
+        return snapshot
     }
 
     private func extractRateLimitJSON(from body: String) -> String? {

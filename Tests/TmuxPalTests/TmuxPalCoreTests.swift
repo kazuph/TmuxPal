@@ -89,6 +89,35 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertEqual(weeklyPace, 3600.0 / 604800.0 * 100.0, accuracy: 0.0001)
     }
 
+    func testParsesCodexWhamUsagePrimaryAndSecondaryWindows() throws {
+        let payload = """
+        {
+          "rate_limit": {
+            "allowed": true,
+            "limit_reached": false,
+            "primary_window": {
+              "used_percent": 99,
+              "limit_window_seconds": 18000,
+              "reset_after_seconds": 8963,
+              "reset_at": 1782980523
+            },
+            "secondary_window": {
+              "used_percent": 15,
+              "limit_window_seconds": 604800,
+              "reset_after_seconds": 595763,
+              "reset_at": 1783567323
+            }
+          }
+        }
+        """.data(using: .utf8)!
+
+        let snapshot = try XCTUnwrap(CodexUsageParser.snapshot(from: payload, observedAt: Date(timeIntervalSince1970: 0)))
+        XCTAssertEqual(snapshot.shortTerm?.label, "5h")
+        XCTAssertEqual(snapshot.shortTerm?.remainingPercent, 1)
+        XCTAssertEqual(snapshot.weekly?.label, "7d")
+        XCTAssertEqual(snapshot.weekly?.remainingPercent, 85)
+    }
+
     func testUsagePaceRemainingPercentMovesFromFullToEmptyByReset() {
         let bucket = CodexUsageBucket(
             label: "5h",
