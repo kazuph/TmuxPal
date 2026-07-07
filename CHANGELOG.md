@@ -1,8 +1,8 @@
 # Changelog
 
-## v0.9.9
+## v0.9.15
 
-TmuxPal v0.9.9 stops Claude usage rings from prompting for Claude Code
+TmuxPal v0.9.15 stops Claude usage rings from prompting for Claude Code
 keychain access.
 
 ### Highlights
