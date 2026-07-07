@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import Security
 import ServiceManagement
 import SQLite3
 import TmuxPalCore
@@ -1036,20 +1035,10 @@ struct CodexUsageReader {
     }
 }
 
-/// Reads Claude Code rate limits. Preferred source is a statusline cache file
-/// (see README: a Claude Code statusline script that dumps the `rate_limits`
-/// JSON it receives on stdin) because it needs no keychain access and never
-/// hits the network. When the cache is absent or stale it falls back to
-/// api.anthropic.com/api/oauth/usage with the Claude Code OAuth token from
-/// ~/.claude/.credentials.json or the macOS keychain. The live endpoint rate
-/// limits aggressively, so fetches are throttled and failures back off.
+/// Reads Claude Code rate limits from a statusline cache file. TmuxPal does not
+/// read Claude Code credentials or the macOS keychain for Claude usage rings.
 actor ClaudeUsageReader {
     static let maxCacheAge: TimeInterval = 24 * 60 * 60
-    static let liveFetchInterval: TimeInterval = 5 * 60
-    static let liveFailureBackoff: TimeInterval = 15 * 60
-    static let keychainService = "Claude Code-credentials"
-
-    private let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
 
     private var claudeHome: URL {
         if let configDir = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"],
@@ -1058,16 +1047,9 @@ actor ClaudeUsageReader {
         }
         return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
     }
-    private var lastLiveSnapshot: ClaudeUsageSnapshot?
-    private var lastLiveAttempt: Date?
-    private var liveRetryInterval: TimeInterval = 0
-    private var cachedAccessToken: String?
 
     func readLatest() async -> ClaudeUsageSnapshot? {
-        if let cached = readStatuslineCache() {
-            return cached
-        }
-        return await readLiveUsage()
+        readStatuslineCache()
     }
 
     private var cacheURL: URL {
@@ -1087,149 +1069,6 @@ actor ClaudeUsageReader {
             return nil
         }
         return ClaudeUsageParser.snapshot(from: data, source: "statusline-cache")
-    }
-
-    private func readLiveUsage() async -> ClaudeUsageSnapshot? {
-        let now = Date()
-        if let lastLiveAttempt, now.timeIntervalSince(lastLiveAttempt) < liveRetryInterval {
-            return freshEnough(lastLiveSnapshot)
-        }
-        lastLiveAttempt = now
-        guard let token = accessToken() else {
-            DebugLog.write("claude usage: no oauth token available; skipping live fetch")
-            liveRetryInterval = Self.liveFailureBackoff
-            return freshEnough(lastLiveSnapshot)
-        }
-        var request = URLRequest(url: usageURL)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 6
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        // Without a claude-code user agent this endpoint serves a far stricter
-        // 429 bucket, which makes polling unusable.
-        request.setValue("claude-code/2.1.80", forHTTPHeaderField: "User-Agent")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse else {
-            DebugLog.write("claude usage: live fetch failed (network)")
-            liveRetryInterval = Self.liveFailureBackoff
-            return freshEnough(lastLiveSnapshot)
-        }
-        guard (200..<300).contains(http.statusCode),
-              let snapshot = ClaudeUsageParser.snapshot(from: data, source: "live") else {
-            DebugLog.write("claude usage: live fetch failed status=\(http.statusCode)")
-            if http.statusCode == 401 || http.statusCode == 403 {
-                cachedAccessToken = nil
-            }
-            liveRetryInterval = Self.liveFailureBackoff
-            return freshEnough(lastLiveSnapshot)
-        }
-        DebugLog.write("claude usage: live fetch ok fiveHour=\(snapshot.fiveHour != nil) sevenDay=\(snapshot.sevenDay != nil)")
-        liveRetryInterval = Self.liveFetchInterval
-        lastLiveSnapshot = snapshot
-        return snapshot
-    }
-
-    private func freshEnough(_ snapshot: ClaudeUsageSnapshot?) -> ClaudeUsageSnapshot? {
-        guard let snapshot,
-              Date().timeIntervalSince(snapshot.observedAt) <= Self.maxCacheAge else {
-            return nil
-        }
-        return snapshot
-    }
-
-    private func accessToken() -> String? {
-        if let cachedAccessToken {
-            return cachedAccessToken
-        }
-        if let token = credentialsFileToken() {
-            cachedAccessToken = token
-            return token
-        }
-        if let token = keychainToken() {
-            cachedAccessToken = token
-            return token
-        }
-        return nil
-    }
-
-    private func credentialsFileToken() -> String? {
-        let url = claudeHome.appendingPathComponent(".credentials.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return oauthToken(from: data)
-    }
-
-    private func keychainToken() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.keychainService,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess else {
-            DebugLog.write("claude usage: keychain lookup failed status=\(status)")
-            return nil
-        }
-        guard let items = item as? [[String: Any]] else {
-            DebugLog.write("claude usage: keychain lookup returned unexpected item")
-            return nil
-        }
-        for account in tokenKeychainAccounts(from: items) {
-            guard let data = keychainData(account: account),
-                  let token = oauthToken(from: data) else {
-                continue
-            }
-            DebugLog.write("claude usage: oauth token loaded from keychain account=\(account)")
-            return token
-        }
-        DebugLog.write("claude usage: no usable oauth token in keychain")
-        return nil
-    }
-
-    private func tokenKeychainAccounts(from items: [[String: Any]]) -> [String] {
-        items
-            .compactMap { $0[kSecAttrAccount as String] as? String }
-            .filter { !$0.localizedCaseInsensitiveContains("Assistant Identifier") }
-    }
-
-    private func keychainData(account: String) -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.keychainService,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess else {
-            DebugLog.write("claude usage: keychain data lookup failed account=\(account) status=\(status)")
-            return nil
-        }
-        guard let data = item as? Data else {
-            DebugLog.write("claude usage: keychain data lookup returned unexpected item account=\(account)")
-            return nil
-        }
-        return data
-    }
-
-    private func oauthToken(from data: Data) -> String? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let oauth = object["claudeAiOauth"] as? [String: Any],
-              let token = oauth["accessToken"] as? String,
-              !token.isEmpty else {
-            return nil
-        }
-        if let expiresAt = oauth["expiresAt"] as? Double {
-            let expirySeconds = expiresAt > 10_000_000_000 ? expiresAt / 1000.0 : expiresAt
-            guard expirySeconds > Date().timeIntervalSince1970 + 60 else {
-                DebugLog.write("claude usage: oauth token expired; waiting for claude code to refresh it")
-                return nil
-            }
-        }
-        return token
     }
 }
 

@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.9.9
+
+TmuxPal v0.9.9 stops Claude usage rings from prompting for Claude Code
+keychain access.
+
+### Highlights
+
+- Claude usage rings now read only the local Claude Code statusline cache.
+  TmuxPal no longer falls back to `~/.claude/.credentials.json`, the macOS
+  keychain item `Claude Code-credentials`, or Anthropic's OAuth usage
+  endpoint.
+- When no fresh statusline cache exists, Claude rings stay hidden instead of
+  asking macOS for access to Claude Code credentials.
+
+### Verification
+
+- `swift test`
+- Confirmed the app binary no longer contains `Claude Code-credentials`,
+  `api/oauth/usage`, `.credentials.json`, or `SecItem` strings.
+- Replaced and launched `/Applications/TmuxPal.app`; no `SecurityAgent`
+  keychain prompt process appeared after launch.
+
 ## v0.9.8
 
 TmuxPal v0.9.8 ships a new app icon for its new life in the Dock.

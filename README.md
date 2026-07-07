@@ -146,11 +146,9 @@ Usage rings are the only feature that can make network requests:
 - Codex rings: when usage rings are enabled and Codex auth is available,
   TmuxPal reads the local `${CODEX_HOME:-$HOME/.codex}/auth.json` access token
   and calls ChatGPT's usage endpoint directly from your Mac.
-- Claude rings: TmuxPal first looks for a local statusline cache file and makes
-  no network request at all when it is present. Only when the cache is missing
-  or stale does it read the Claude Code OAuth token (from
-  `~/.claude/.credentials.json` or the macOS keychain) and call Anthropic's
-  usage endpoint directly from your Mac.
+- Claude rings: TmuxPal only reads a local statusline cache file. It does not
+  read Claude Code credentials, access the macOS keychain, or call Anthropic's
+  usage endpoint directly.
 
 Tokens are not written into TmuxPal logs or sent anywhere else by TmuxPal.
 
@@ -212,25 +210,16 @@ The Codex ring palette is sampled from the selected pal while filtering out
 likely skin and hair tones, so outfit colors are more likely to drive the final
 ring color.
 
-### Claude Usage Data Sources
+### Claude Usage Data Source
 
-Claude rings resolve data in this order:
+Claude rings use a statusline cache file containing the `rate_limits` JSON that
+Claude Code (v2.1.80+) passes to statusline scripts on stdin. Default path:
+`~/.claude/cache/statusline-rate-limits.json`, overridable with the
+`TMUXPAL_CLAUDE_USAGE_CACHE` environment variable. Files older than 24 hours
+are ignored. `CLAUDE_CONFIG_DIR` is honored when set.
 
-1. **Statusline cache (recommended).** A file containing the `rate_limits`
-   JSON that Claude Code (v2.1.80+) passes to statusline scripts on stdin.
-   Default path: `~/.claude/cache/statusline-rate-limits.json`, overridable
-   with the `TMUXPAL_CLAUDE_USAGE_CACHE` environment variable. Files older
-   than 24 hours are ignored. `CLAUDE_CONFIG_DIR` is honored when set.
-2. **OAuth usage endpoint (fallback).** When no fresh cache exists, TmuxPal
-   reads the Claude Code OAuth token from `~/.claude/.credentials.json` or the
-   macOS keychain item `Claude Code-credentials` (this may show a one-time
-   keychain permission prompt) and queries
-   `https://api.anthropic.com/api/oauth/usage`. The endpoint rate limits
-   aggressively, so TmuxPal polls it at most every 5 minutes and backs off for
-   15 minutes after failures.
-
-The cache route needs no keychain access and no network requests. To enable
-it, make your Claude Code statusline script persist the `rate_limits` it
+This route needs no keychain access and no network requests from TmuxPal. To
+enable it, make your Claude Code statusline script persist the `rate_limits` it
 receives. If you do not have a statusline yet, this minimal script is enough:
 
 ```bash
