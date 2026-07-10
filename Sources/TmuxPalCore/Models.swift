@@ -131,6 +131,13 @@ public struct PaneBubble: Identifiable, Equatable, Sendable {
     }
 }
 
+public extension Array where Element == PaneBubble {
+    func deduplicatedByPaneID() -> [PaneBubble] {
+        var paneIDs = Set<String>()
+        return filter { paneIDs.insert($0.pane.paneId).inserted }
+    }
+}
+
 public struct TmuxHookEvent: Codable, Equatable, Sendable {
     public let event: String
     public let sessionName: String

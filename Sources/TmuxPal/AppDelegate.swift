@@ -1916,7 +1916,7 @@ final class OverlayView: NSView {
     }
 
     func setBubbles(_ bubbles: [PaneBubble]) {
-        self.bubbles = bubbles.sorted { lhs, rhs in
+        self.bubbles = bubbles.deduplicatedByPaneID().sorted { lhs, rhs in
             let leftSessionRank = lhs.pane.sessionName == "0" ? 0 : 1
             let rightSessionRank = rhs.pane.sessionName == "0" ? 0 : 1
             if leftSessionRank != rightSessionRank {

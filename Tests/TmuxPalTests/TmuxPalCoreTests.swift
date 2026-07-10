@@ -2,6 +2,21 @@ import XCTest
 @testable import TmuxPalCore
 
 final class TmuxPalCoreTests: XCTestCase {
+    func testDeduplicatesBubblesByPaneIDKeepingFirstObservation() {
+        let first = PaneBubble(
+            pane: makePane(paneId: "%145", command: "codex", transcriptTail: "first"),
+            summary: "first observation"
+        )
+        let duplicate = PaneBubble(
+            pane: makePane(paneId: "%145", command: "codex", transcriptTail: "duplicate"),
+            summary: "duplicate observation"
+        )
+
+        let bubbles = [first, duplicate].deduplicatedByPaneID()
+
+        XCTAssertEqual(bubbles, [first])
+    }
+
     func testDetectsAiToolsFromTmuxRows() throws {
         let fixture = try String(contentsOfFile: fixturePath("list-panes.txt"), encoding: .utf8)
         let panes = TmuxCollector().parseListPanes(fixture)
