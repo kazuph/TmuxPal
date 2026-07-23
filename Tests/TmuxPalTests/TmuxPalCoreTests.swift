@@ -86,6 +86,21 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertEqual(panes[0].status, .idle)
     }
 
+    func testReusesHerdrTranscriptWithoutExpiryOnlyForNonRunningStatuses() throws {
+        let collector = TmuxCollector()
+        let idle = try XCTUnwrap(collector.parseHerdrAgentList(herdrAgentList(status: "idle", focused: false)).first)
+        let selected = try XCTUnwrap(collector.parseHerdrAgentList(herdrAgentList(status: "idle", focused: true)).first)
+        let done = try XCTUnwrap(collector.parseHerdrAgentList(herdrAgentList(status: "done", focused: false)).first)
+        let working = try XCTUnwrap(collector.parseHerdrAgentList(herdrAgentList(status: "working", focused: false)).first)
+        let tmux = makePane(command: "codex", transcriptTail: "", active: false)
+
+        XCTAssertTrue(TmuxCollector.shouldReuseHerdrTranscriptWithoutExpiry(idle))
+        XCTAssertTrue(TmuxCollector.shouldReuseHerdrTranscriptWithoutExpiry(selected))
+        XCTAssertTrue(TmuxCollector.shouldReuseHerdrTranscriptWithoutExpiry(done))
+        XCTAssertFalse(TmuxCollector.shouldReuseHerdrTranscriptWithoutExpiry(working))
+        XCTAssertFalse(TmuxCollector.shouldReuseHerdrTranscriptWithoutExpiry(tmux))
+    }
+
     func testParsesCodexWeeklyAndMonthlyUsageBuckets() throws {
         let payload = """
         {
@@ -291,6 +306,27 @@ final class TmuxPalCoreTests: XCTestCase {
             BubbleRunClassifier().classify(PaneBubble(pane: pane, summary: "sample-repo\nReview current diff")),
             .running
         )
+    }
+
+    func testClassifiesHerdrIdleAsCompleteDespiteRunningTranscript() throws {
+        let pane = try XCTUnwrap(
+            TmuxCollector().parseHerdrAgentList(herdrAgentList(status: "idle", focused: false)).first
+        ).withTranscript(excerpt: "Run tests", tail: "• Working (43s · esc to interrupt)")
+        let selectedPane = try XCTUnwrap(
+            TmuxCollector().parseHerdrAgentList(herdrAgentList(status: "idle", focused: true)).first
+        ).withTranscript(excerpt: "Run tests", tail: "• Working (43s · esc to interrupt)")
+
+        XCTAssertEqual(BubbleRunClassifier().classify(PaneBubble(pane: pane, summary: "Run tests")), .complete)
+        XCTAssertEqual(BubbleRunClassifier().classify(PaneBubble(pane: selectedPane, summary: "Run tests")), .complete)
+    }
+
+    func testClassifiesHerdrDoneAsComplete() throws {
+        let pane = try XCTUnwrap(
+            TmuxCollector().parseHerdrAgentList(herdrAgentList(status: "done", focused: false)).first
+        ).withTranscript(excerpt: "Run tests", tail: "• Working (43s · esc to interrupt)")
+
+        XCTAssertEqual(pane.status, .idle)
+        XCTAssertEqual(BubbleRunClassifier().classify(PaneBubble(pane: pane, summary: "Run tests")), .complete)
     }
 
     func testClassifiesCodexPromptAsComplete() {
@@ -626,6 +662,12 @@ final class TmuxPalCoreTests: XCTestCase {
             active ? "1" : "0",
             title
         ].joined(separator: TmuxCollector.fieldSeparator)
+    }
+
+    private func herdrAgentList(status: String, focused: Bool) -> String {
+        """
+        {"id":"cli:agent:list","result":{"agents":[{"agent":"codex","agent_status":"\(status)","cwd":"/workspace/tmuxpal","focused":\(focused),"pane_id":"w1-1","revision":0,"tab_id":"w1:1","terminal_id":"term_1","workspace_id":"w1"}],"type":"agent_list"}}
+        """
     }
 
 }

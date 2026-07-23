@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.9.16
+
+TmuxPal v0.9.16 trusts Herdr's agent status and stops repeatedly reading
+transcripts from idle and completed panes.
+
+### Highlights
+
+- Herdr `idle` and `done` statuses now determine completion without stale
+  transcript markers overriding them.
+- Stable idle and completed Herdr panes reuse their cached transcript until
+  status or selection changes, while working panes keep their existing refresh
+  behavior.
+- Duplicate pane IDs are removed before the overlay sorts and displays
+  bubbles.
+
+### Verification
+
+- `swift test` passed all 37 tests.
+- A release app build passed strict code-signature verification.
+- In a 20-second live comparison against the same local Herdr server,
+  `agent read` calls fell from 85 to 31. Excluding each pane's initial read,
+  repeated reads fell from 58 to 4, and the remaining reads targeted working
+  panes only.
+
 ## v0.9.15
 
 TmuxPal v0.9.15 stops Claude usage rings from prompting for Claude Code

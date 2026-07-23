@@ -9,6 +9,10 @@ public struct BubbleRunClassifier: Sendable {
     public init() {}
 
     public func classify(_ bubble: PaneBubble) -> BubbleRunState {
+        if bubble.pane.sessionName == TmuxCollector.herdrSessionName {
+            return bubble.pane.status == .running ? .running : .complete
+        }
+
         if bubble.pane.status == .running {
             return .running
         }

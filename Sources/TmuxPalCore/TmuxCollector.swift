@@ -199,7 +199,7 @@ public struct TmuxCollector: Sendable {
 
     private func herdrStatus(_ status: String, focused: Bool) -> PaneStatus {
         switch status {
-        case "idle":
+        case "idle", "done":
             return focused ? .selected : .idle
         case "working", "blocked", "unknown":
             return .running
@@ -324,13 +324,21 @@ public struct TmuxCollector: Sendable {
             pane.active ? "1" : "0"
         ].joined(separator: "|")
         let maxAge = pane.active ? activeTranscriptCacheTTL : inactiveTranscriptCacheTTL
-        if let cached = transcriptCache.transcript(for: pane.paneId, signature: signature, maxAge: maxAge) {
+        if let cached = transcriptCache.transcript(
+            for: pane.paneId,
+            signature: signature,
+            maxAge: Self.shouldReuseHerdrTranscriptWithoutExpiry(pane) ? nil : maxAge
+        ) {
             return cached
         }
         let transcript = captureTranscript(for: pane.paneId)
         let excerpt = summarizeTranscript(transcript)
         transcriptCache.storeTranscript(excerpt: excerpt, tail: transcript, for: pane.paneId, signature: signature)
         return (excerpt, transcript)
+    }
+
+    internal static func shouldReuseHerdrTranscriptWithoutExpiry(_ pane: TmuxPane) -> Bool {
+        pane.sessionName == herdrSessionName && (pane.status == .idle || pane.status == .selected)
     }
 
     private func summarizeTranscript(_ output: String) -> String {
@@ -544,12 +552,14 @@ private final class LockedTranscriptCache: @unchecked Sendable {
     private var processCommandLines: [String: StringEntry] = [:]
     private let processCommandLineTTL: TimeInterval = 30
 
-    func transcript(for paneId: String, signature: String, maxAge: TimeInterval) -> (excerpt: String, tail: String)? {
+    func transcript(for paneId: String, signature: String, maxAge: TimeInterval?) -> (excerpt: String, tail: String)? {
         lock.lock()
         defer { lock.unlock() }
         guard let entry = transcripts[paneId],
-              entry.signature == signature,
-              Date().timeIntervalSince(entry.createdAt) < maxAge else {
+              entry.signature == signature else {
+            return nil
+        }
+        if let maxAge, Date().timeIntervalSince(entry.createdAt) >= maxAge {
             return nil
         }
         return (entry.excerpt, entry.tail)
