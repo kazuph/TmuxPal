@@ -3,12 +3,65 @@ import Foundation
 public struct ClaudeUsageSnapshot: Equatable, Sendable {
     public let fiveHour: CodexUsageBucket?
     public let sevenDay: CodexUsageBucket?
+    public let modelLimits: [ClaudeModelUsageLimit]
+    public let fiveHourObservedAt: Date?
+    public let sevenDayObservedAt: Date?
     public let observedAt: Date
     public let source: String
 
-    public var hasVisibleBuckets: Bool {
-        fiveHour != nil || sevenDay != nil
+    public init(
+        fiveHour: CodexUsageBucket?,
+        sevenDay: CodexUsageBucket?,
+        modelLimits: [ClaudeModelUsageLimit],
+        fiveHourObservedAt: Date?,
+        sevenDayObservedAt: Date?,
+        observedAt: Date,
+        source: String
+    ) {
+        self.fiveHour = fiveHour
+        self.sevenDay = sevenDay
+        self.modelLimits = modelLimits
+        self.fiveHourObservedAt = fiveHourObservedAt
+        self.sevenDayObservedAt = sevenDayObservedAt
+        self.observedAt = observedAt
+        self.source = source
     }
+
+    public var hasVisibleBuckets: Bool {
+        fiveHour != nil || sevenDay != nil || !modelLimits.isEmpty
+    }
+
+    public static func merged(
+        statuslineSnapshot: ClaudeUsageSnapshot?,
+        modelLimitsSnapshot: ClaudeUsageSnapshot?
+    ) -> ClaudeUsageSnapshot? {
+        guard statuslineSnapshot != nil || modelLimitsSnapshot != nil else {
+            return nil
+        }
+        let fiveHourUsesStatusline = statuslineSnapshot?.fiveHour != nil
+        let sevenDayUsesStatusline = statuslineSnapshot?.sevenDay != nil
+        return ClaudeUsageSnapshot(
+            fiveHour: statuslineSnapshot?.fiveHour ?? modelLimitsSnapshot?.fiveHour,
+            sevenDay: statuslineSnapshot?.sevenDay ?? modelLimitsSnapshot?.sevenDay,
+            modelLimits: modelLimitsSnapshot?.modelLimits ?? [],
+            fiveHourObservedAt: fiveHourUsesStatusline
+                ? statuslineSnapshot?.fiveHourObservedAt
+                : modelLimitsSnapshot?.fiveHourObservedAt,
+            sevenDayObservedAt: sevenDayUsesStatusline
+                ? statuslineSnapshot?.sevenDayObservedAt
+                : modelLimitsSnapshot?.sevenDayObservedAt,
+            observedAt: statuslineSnapshot?.observedAt ?? modelLimitsSnapshot?.observedAt ?? Date(),
+            source: [statuslineSnapshot?.source, modelLimitsSnapshot?.source]
+                .compactMap { $0 }
+                .joined(separator: "+")
+        )
+    }
+}
+
+public struct ClaudeModelUsageLimit: Equatable, Sendable {
+    public let displayName: String
+    public let bucket: CodexUsageBucket
+    public let observedAt: Date
 }
 
 /// Parses Claude Code rate-limit payloads. Accepts both the statusline JSON
@@ -46,7 +99,15 @@ public enum ClaudeUsageParser {
         guard fiveHour != nil || sevenDay != nil else {
             return nil
         }
-        return ClaudeUsageSnapshot(fiveHour: fiveHour, sevenDay: sevenDay, observedAt: observedAt, source: source)
+        return ClaudeUsageSnapshot(
+            fiveHour: fiveHour,
+            sevenDay: sevenDay,
+            modelLimits: [],
+            fiveHourObservedAt: fiveHour == nil ? nil : observedAt,
+            sevenDayObservedAt: sevenDay == nil ? nil : observedAt,
+            observedAt: observedAt,
+            source: source
+        )
     }
 
     private static func firstValue(in dictionary: [String: Any], keys: [String]) -> Any? {
@@ -105,6 +166,79 @@ public enum ClaudeUsageParser {
             }
         }
         return nil
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        switch value {
+        case let value as Double:
+            return value
+        case let value as Int:
+            return Double(value)
+        case let value as String:
+            return Double(value)
+        default:
+            return nil
+        }
+    }
+}
+
+/// Parses the direct Claude Code get_usage cache written by
+/// claude-model-limits-fetch.mjs. It is intentionally separate from the
+/// statusline parser because the two files have distinct freshness contracts.
+public enum ClaudeModelLimitsParser {
+    public static let maxCacheAge: TimeInterval = 24 * 60 * 60
+
+    public static func snapshot(from data: Data, now: Date = Date()) -> ClaudeUsageSnapshot? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return snapshot(from: object, now: now)
+    }
+
+    public static func snapshot(from object: [String: Any], now: Date = Date()) -> ClaudeUsageSnapshot? {
+        guard let fetchedAt = number(object["fetched_at"]) else {
+            return nil
+        }
+        let observedAt = Date(timeIntervalSince1970: fetchedAt)
+        guard now.timeIntervalSince(observedAt) >= 0,
+              now.timeIntervalSince(observedAt) <= maxCacheAge else {
+            return nil
+        }
+
+        let rateLimitSnapshot = ClaudeUsageParser.snapshot(
+            from: object,
+            observedAt: observedAt,
+            source: object["source"] as? String ?? "get_usage-cache"
+        )
+        let modelLimits = (object["model_limits"] as? [[String: Any]] ?? []).compactMap { item -> ClaudeModelUsageLimit? in
+            guard let displayName = item["display_name"] as? String,
+                  !displayName.isEmpty,
+                  let usedPercentage = number(item["used_percentage"]) else {
+                return nil
+            }
+            return ClaudeModelUsageLimit(
+                displayName: displayName,
+                bucket: CodexUsageBucket(
+                    label: "W",
+                    usedPercent: min(max(usedPercentage, 0.0), 100.0),
+                    windowSeconds: ClaudeUsageParser.sevenDayWindowSeconds,
+                    resetAt: number(item["resets_at"])
+                ),
+                observedAt: observedAt
+            )
+        }
+        guard rateLimitSnapshot != nil || !modelLimits.isEmpty else {
+            return nil
+        }
+        return ClaudeUsageSnapshot(
+            fiveHour: rateLimitSnapshot?.fiveHour,
+            sevenDay: rateLimitSnapshot?.sevenDay,
+            modelLimits: modelLimits,
+            fiveHourObservedAt: rateLimitSnapshot?.fiveHourObservedAt,
+            sevenDayObservedAt: rateLimitSnapshot?.sevenDayObservedAt,
+            observedAt: observedAt,
+            source: object["source"] as? String ?? "get_usage-cache"
+        )
     }
 
     private static func number(_ value: Any?) -> Double? {

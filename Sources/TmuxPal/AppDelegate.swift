@@ -614,24 +614,34 @@ private enum StatusBarLimitImage {
         codexPalette: UsageRingPalette,
         claudePalette: UsageRingPalette
     ) -> [Row] {
-        [
+        var rows = [
             Row(label: "CC W", bucket: claudeSnapshot?.sevenDay, color: claudePalette.weekly),
             Row(label: "CC 5h", bucket: claudeSnapshot?.fiveHour, color: claudePalette.shortTerm),
-            Row(label: "CX W", bucket: codexSnapshot?.weekly, color: codexPalette.weekly),
-            Row(label: "CX 5h", bucket: codexSnapshot?.shortTerm, color: codexPalette.shortTerm)
         ]
+        if let modelLimit = claudeSnapshot?.modelLimits.first {
+            rows.append(Row(
+                label: "\(modelLimit.displayName.prefix(3).uppercased()) W",
+                bucket: modelLimit.bucket,
+                color: claudePalette.weekly
+            ))
+        }
+        rows.append(Row(label: "CX W", bucket: codexSnapshot?.weekly, color: codexPalette.weekly))
+        return rows
     }
 
     private static func usageRows(
         codexSnapshot: CodexUsageSnapshot?,
         claudeSnapshot: ClaudeUsageSnapshot?
     ) -> [(label: String, bucket: CodexUsageBucket?)] {
-        [
+        var rows = [
             ("Claude Code W", claudeSnapshot?.sevenDay),
-            ("Claude Code 5h", claudeSnapshot?.fiveHour),
-            ("Codex W", codexSnapshot?.weekly),
-            ("Codex 5h", codexSnapshot?.shortTerm)
+            ("Claude Code 5h", claudeSnapshot?.fiveHour)
         ]
+        for modelLimit in claudeSnapshot?.modelLimits ?? [] {
+            rows.append(("\(modelLimit.displayName) W", modelLimit.bucket))
+        }
+        rows.append(("Codex W", codexSnapshot?.weekly))
+        return rows
     }
 
     private static func limitText(for bucket: CodexUsageBucket?) -> String {
@@ -699,6 +709,76 @@ private enum StatusBarLimitImage {
             .foregroundColor: color,
             .shadow: shadow
         ]
+    }
+}
+
+@MainActor
+struct UsageImageExportResult {
+    let statusBarWritten: Bool
+    let overlayWritten: Bool
+    let overlayLabelBounds: [(label: String, rect: NSRect)]
+    let overlaySize: NSSize?
+}
+
+@MainActor
+enum UsageImageExporter {
+    static func export(
+        statusBarURL: URL?,
+        overlayURL: URL?
+    ) async -> UsageImageExportResult {
+        let codexReader = CodexUsageReader()
+        let claudeReader = ClaudeUsageReader()
+        async let codexSnapshot = codexReader.readLatest()
+        async let claudeSnapshot = claudeReader.readLatest()
+        let codex = await codexSnapshot
+        let claude = await claudeSnapshot
+
+        let statusBarWritten: Bool
+        if let statusBarURL,
+           let image = PalSettings.statusBarImage(codexSnapshot: codex, claudeSnapshot: claude) {
+            statusBarWritten = writePNG(image, to: statusBarURL)
+        } else {
+            statusBarWritten = statusBarURL == nil
+        }
+
+        guard let overlayURL else {
+            return UsageImageExportResult(
+                statusBarWritten: statusBarWritten,
+                overlayWritten: true,
+                overlayLabelBounds: [],
+                overlaySize: nil
+            )
+        }
+        let overlay = OverlayView(frame: .zero, palAssetConfig: PalSettings.assetConfig())
+        overlay.setShowsBubbleUI(false)
+        overlay.setUsageRingMode(.labeled, persist: false)
+        overlay.setUsageSnapshot(codex)
+        overlay.setClaudeUsageSnapshot(claude)
+        let size = overlay.preferredSize()
+        overlay.frame = NSRect(origin: .zero, size: size)
+        overlay.displayIfNeeded()
+        overlay.writeSnapshot(to: overlayURL)
+        return UsageImageExportResult(
+            statusBarWritten: statusBarWritten,
+            overlayWritten: FileManager.default.fileExists(atPath: overlayURL.path),
+            overlayLabelBounds: overlay.usageRingTagBounds(),
+            overlaySize: size
+        )
+    }
+
+    private static func writePNG(_ image: NSImage, to url: URL) -> Bool {
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else {
+            return false
+        }
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try png.write(to: url)
+            return true
+        } catch {
+            return false
+        }
     }
 }
 
@@ -1049,7 +1129,11 @@ actor ClaudeUsageReader {
     }
 
     func readLatest() async -> ClaudeUsageSnapshot? {
-        readStatuslineCache()
+        let statuslineSnapshot = readStatuslineCache()
+        return ClaudeUsageSnapshot.merged(
+            statuslineSnapshot: statuslineSnapshot,
+            modelLimitsSnapshot: readModelLimitsCache()
+        )
     }
 
     private var cacheURL: URL {
@@ -1060,6 +1144,10 @@ actor ClaudeUsageReader {
         return claudeHome.appendingPathComponent("cache/statusline-rate-limits.json")
     }
 
+    private var modelLimitsCacheURL: URL {
+        claudeHome.appendingPathComponent("cache/claude-model-limits.json")
+    }
+
     private func readStatuslineCache() -> ClaudeUsageSnapshot? {
         let url = cacheURL
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
@@ -1068,7 +1156,18 @@ actor ClaudeUsageReader {
               let data = try? Data(contentsOf: url) else {
             return nil
         }
-        return ClaudeUsageParser.snapshot(from: data, source: "statusline-cache")
+        return ClaudeUsageParser.snapshot(
+            from: data,
+            observedAt: modifiedAt,
+            source: "statusline-cache"
+        )
+    }
+
+    private func readModelLimitsCache() -> ClaudeUsageSnapshot? {
+        guard let data = try? Data(contentsOf: modelLimitsCacheURL) else {
+            return nil
+        }
+        return ClaudeModelLimitsParser.snapshot(from: data)
     }
 }
 
@@ -1899,9 +1998,11 @@ final class OverlayView: NSView {
         onCollapseChanged?()
     }
 
-    func setUsageRingMode(_ usageRingMode: UsageRingDisplayMode) {
+    func setUsageRingMode(_ usageRingMode: UsageRingDisplayMode, persist: Bool = true) {
         self.usageRingMode = usageRingMode
-        UserDefaults.standard.set(usageRingMode.rawValue, forKey: Self.usageRingModeDefaultsKey)
+        if persist {
+            UserDefaults.standard.set(usageRingMode.rawValue, forKey: Self.usageRingModeDefaultsKey)
+        }
         needsDisplay = true
     }
 
@@ -2035,6 +2136,21 @@ final class OverlayView: NSView {
         try? data.write(to: url)
     }
 
+    func usageRingTagBounds() -> [(label: String, rect: NSRect)] {
+        usageRings().map { ring in
+            (
+                label: ring.label,
+                rect: usageRingTagRect(
+                    label: ring.label,
+                    bucket: ring.bucket,
+                    center: ring.center,
+                    radius: ring.radius,
+                    yOffset: ring.labelYOffset
+                )
+            )
+        }
+    }
+
     private func drawPal() {
         let palRect = palRect()
         let frames = framesByState[animationState] ?? framesByState["idle"] ?? []
@@ -2100,7 +2216,7 @@ final class OverlayView: NSView {
                     label: sevenDay.label,
                     bucket: sevenDay,
                     color: claudeRingPalette.weekly,
-                    observedAt: claudeUsageSnapshot.observedAt
+                    observedAt: claudeUsageSnapshot.sevenDayObservedAt ?? claudeUsageSnapshot.observedAt
                 ))
             }
             if let fiveHour = claudeUsageSnapshot.fiveHour {
@@ -2108,7 +2224,15 @@ final class OverlayView: NSView {
                     label: fiveHour.label,
                     bucket: fiveHour,
                     color: claudeRingPalette.shortTerm,
-                    observedAt: claudeUsageSnapshot.observedAt
+                    observedAt: claudeUsageSnapshot.fiveHourObservedAt ?? claudeUsageSnapshot.observedAt
+                ))
+            }
+            for modelLimit in claudeUsageSnapshot.modelLimits {
+                specs.append(UsageRingSpec(
+                    label: modelLimit.displayName,
+                    bucket: modelLimit.bucket,
+                    color: claudeRingPalette.weekly,
+                    observedAt: modelLimit.observedAt
                 ))
             }
         }
@@ -2126,14 +2250,6 @@ final class OverlayView: NSView {
                     label: "W",
                     bucket: weekly,
                     color: usageRingPalette.weekly,
-                    observedAt: usageSnapshot.observedAt
-                ))
-            }
-            if let shortTerm = usageSnapshot.shortTerm {
-                specs.append(UsageRingSpec(
-                    label: shortTerm.label,
-                    bucket: shortTerm,
-                    color: usageRingPalette.shortTerm,
                     observedAt: usageSnapshot.observedAt
                 ))
             }
@@ -2257,27 +2373,43 @@ final class OverlayView: NSView {
     }
 
     private func drawUsageRingTag(_ label: String, bucket: CodexUsageBucket, center: CGPoint, radius: CGFloat, color: NSColor, yOffset: CGFloat) {
-        let text = "\(label.replacingOccurrences(of: " ", with: "")) \(Int(round(bucket.remainingPercent)))%"
+        let text = usageRingTagText(label: label, bucket: bucket)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .bold),
             .foregroundColor: NSColor.white
         ]
-        let textSize = NSString(string: text).size(withAttributes: attrs)
-        let padding = NSSize(width: 5, height: 2.5)
-        let tagRect = NSRect(
+        let tagRect = usageRingTagRect(label: label, bucket: bucket, center: center, radius: radius, yOffset: yOffset)
+        let background = NSBezierPath(roundedRect: tagRect, xRadius: 5, yRadius: 5)
+        color.withAlphaComponent(0.96).setFill()
+        background.fill()
+        NSString(string: text).draw(
+            at: CGPoint(
+                x: tagRect.minX + Self.usageRingTagPadding.width,
+                y: tagRect.minY + Self.usageRingTagPadding.height - 0.5
+            ),
+            withAttributes: attrs
+        )
+    }
+
+    private func usageRingTagText(label: String, bucket: CodexUsageBucket) -> String {
+        "\(label.replacingOccurrences(of: " ", with: "")) \(Int(round(bucket.remainingPercent)))%"
+    }
+
+    private func usageRingTagRect(label: String, bucket: CodexUsageBucket, center: CGPoint, radius: CGFloat, yOffset: CGFloat) -> NSRect {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 7.5, weight: .bold)
+        ]
+        let textSize = NSString(string: usageRingTagText(label: label, bucket: bucket)).size(withAttributes: attrs)
+        let padding = Self.usageRingTagPadding
+        return NSRect(
             x: center.x - radius - textSize.width - padding.width * 2 - 7,
             y: center.y + yOffset,
             width: textSize.width + padding.width * 2,
             height: textSize.height + padding.height * 2
         )
-        let background = NSBezierPath(roundedRect: tagRect, xRadius: 5, yRadius: 5)
-        color.withAlphaComponent(0.96).setFill()
-        background.fill()
-        NSString(string: text).draw(
-            at: CGPoint(x: tagRect.minX + padding.width, y: tagRect.minY + padding.height - 0.5),
-            withAttributes: attrs
-        )
     }
+
+    private static let usageRingTagPadding = NSSize(width: 5, height: 2.5)
 
     private func drawBubbles(dirtyRect: NSRect) {
         bubbleRects.removeAll()

@@ -185,6 +185,57 @@ final class TmuxPalCoreTests: XCTestCase {
         XCTAssertEqual(sevenDay.windowSeconds, 7 * 24 * 60 * 60)
     }
 
+    func testParsesFableModelLimitFromRealUsageFixture() throws {
+        let fetchedAt = Date(timeIntervalSince1970: 1_786_067_562)
+        let data = try modelLimitsCacheData(fetchedAt: fetchedAt)
+
+        let snapshot = try XCTUnwrap(ClaudeModelLimitsParser.snapshot(from: data, now: fetchedAt.addingTimeInterval(1)))
+
+        XCTAssertEqual(snapshot.modelLimits.count, 1)
+        XCTAssertEqual(snapshot.modelLimits.first?.displayName, "Fable")
+        XCTAssertEqual(snapshot.modelLimits.first?.bucket.usedPercent, 100)
+        XCTAssertEqual(snapshot.fiveHour?.usedPercent, 90)
+        XCTAssertEqual(snapshot.sevenDay?.usedPercent, 80)
+    }
+
+    func testRejectsModelLimitsCacheOlderThanOneDay() throws {
+        let fetchedAt = Date(timeIntervalSince1970: 1_786_067_562)
+        let data = try modelLimitsCacheData(fetchedAt: fetchedAt)
+
+        XCTAssertNil(ClaudeModelLimitsParser.snapshot(
+            from: data,
+            now: fetchedAt.addingTimeInterval(ClaudeModelLimitsParser.maxCacheAge + 1)
+        ))
+    }
+
+    func testMergesFreshStatuslineUsageBeforeOlderModelLimitsUsage() throws {
+        let modelFetchedAt = Date(timeIntervalSince1970: 1_786_067_562)
+        let modelLimits = try XCTUnwrap(ClaudeModelLimitsParser.snapshot(
+            from: try modelLimitsCacheData(fetchedAt: modelFetchedAt),
+            now: modelFetchedAt.addingTimeInterval(1)
+        ))
+        let statuslineObservedAt = modelFetchedAt.addingTimeInterval(600)
+        let statusline = try XCTUnwrap(ClaudeUsageParser.snapshot(
+            from: """
+            {"rate_limits":{"five_hour":{"used_percentage":22},"seven_day":{"used_percentage":33}}}
+            """.data(using: .utf8)!,
+            observedAt: statuslineObservedAt,
+            source: "statusline-cache"
+        ))
+
+        let merged = try XCTUnwrap(ClaudeUsageSnapshot.merged(
+            statuslineSnapshot: statusline,
+            modelLimitsSnapshot: modelLimits
+        ))
+
+        XCTAssertEqual(merged.fiveHour?.usedPercent, 22)
+        XCTAssertEqual(merged.sevenDay?.usedPercent, 33)
+        XCTAssertEqual(merged.fiveHourObservedAt, statuslineObservedAt)
+        XCTAssertEqual(merged.sevenDayObservedAt, statuslineObservedAt)
+        XCTAssertEqual(merged.modelLimits.first?.displayName, "Fable")
+        XCTAssertEqual(merged.modelLimits.first?.observedAt, modelFetchedAt)
+    }
+
     func testParsesClaudeUtilizationFractionAndIsoResetTimestamp() throws {
         let payload = """
         {
@@ -614,6 +665,51 @@ final class TmuxPalCoreTests: XCTestCase {
             .appendingPathComponent("Fixtures")
             .appendingPathComponent(name)
             .path
+    }
+
+    private func modelLimitsCacheData(fetchedAt: Date) throws -> Data {
+        let sampleData = try Data(contentsOf: URL(fileURLWithPath: fixturePath("usage-sample.json")))
+        let sample = try XCTUnwrap(JSONSerialization.jsonObject(with: sampleData) as? [String: Any])
+        let rateLimits = try XCTUnwrap(sample["rate_limits"] as? [String: Any])
+        let limits = try XCTUnwrap(rateLimits["limits"] as? [[String: Any]])
+        XCTAssertTrue(limits.contains { ($0["kind"] as? String) == "session" })
+        XCTAssertTrue(limits.contains { ($0["kind"] as? String) == "weekly_all" })
+        let scopedLimit = try XCTUnwrap(limits.first { ($0["kind"] as? String) == "weekly_scoped" })
+        let displayName = try XCTUnwrap(
+            ((scopedLimit["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
+        )
+        let usedPercentage = try XCTUnwrap(scopedLimit["percent"] as? Int)
+        let resetAt = try XCTUnwrap(epochSeconds(from: scopedLimit["resets_at"] as? String))
+        let fiveHour = try XCTUnwrap(rateLimits["five_hour"] as? [String: Any])
+        let sevenDay = try XCTUnwrap(rateLimits["seven_day"] as? [String: Any])
+
+        let cache: [String: Any] = [
+            "fetched_at": Int(fetchedAt.timeIntervalSince1970),
+            "source": "get_usage",
+            "model_limits": [[
+                "display_name": displayName,
+                "used_percentage": usedPercentage,
+                "resets_at": resetAt
+            ]],
+            "rate_limits": [
+                "five_hour": [
+                    "used_percentage": try XCTUnwrap(fiveHour["utilization"] as? Int),
+                    "resets_at": try XCTUnwrap(epochSeconds(from: fiveHour["resets_at"] as? String))
+                ],
+                "seven_day": [
+                    "used_percentage": try XCTUnwrap(sevenDay["utilization"] as? Int),
+                    "resets_at": try XCTUnwrap(epochSeconds(from: sevenDay["resets_at"] as? String))
+                ]
+            ]
+        ]
+        return try JSONSerialization.data(withJSONObject: cache)
+    }
+
+    private func epochSeconds(from text: String?) -> Int? {
+        guard let text else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: text).map { Int($0.timeIntervalSince1970) }
     }
 
     private func makePane(
