@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.9.17
+
+TmuxPal v0.9.17 surfaces the Fable weekly limit, which Claude Code never
+exposed to the menu bar, and drops the Codex 5h window that is no longer
+enforced.
+
+### Highlights
+
+- A model-scoped weekly bar (`FAB W` for Fable) joins the menu bar icon,
+  the tooltip, the menu, and the overlay rings. The label comes from the
+  display name the server returns, so a future model-scoped window needs
+  no code change.
+- The Codex 5h row and its overlay ring are gone; Codex now shows the
+  weekly window only.
+- 5h and all-model weekly figures still come from the statusline cache,
+  which is rewritten on every render rather than every ten minutes. Only
+  the model-scoped windows come from the slower `get_usage` cache, and
+  each bucket carries its own observation time so the pace arcs stay
+  honest.
+- `--dump-status-bar-image` and `--dump-overlay-image` render the real
+  drawing functions to PNG and exit, so the icon can be inspected without
+  stopping an installed copy.
+
+### Verification
+
+- `swift test` passed all 40 tests and a release build succeeded.
+- With the installed copy stopped, a live menu bar check showed the four
+  rows `CC W`, `CC 5h`, `FAB W`, `CX W`, and the menu read
+  `Fable W: 0% remaining, reset 08/11, 5:00` against a real account whose
+  Fable weekly window was exhausted.
+
 ## v0.9.16
 
 TmuxPal v0.9.16 trusts Herdr's agent status and stops repeatedly reading
